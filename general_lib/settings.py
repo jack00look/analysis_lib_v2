@@ -1,0 +1,1 @@
+bec2path = '/home/rick/NAS542_dataBEC2'
