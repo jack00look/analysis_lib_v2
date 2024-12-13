@@ -9,9 +9,9 @@ SVD_selfclean_mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(SVD_selfclean_mod)
 
 
-import settings
-importlib.reload(settings)
-from settings import bec2path
+spec = importlib.util.spec_from_file_location("general_lib.settings", "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/general_lib/settings.py")
+settings = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(settings)
 
 import camera_settings
 importlib.reload(camera_settings)
@@ -21,9 +21,9 @@ try:
     year = 2024
     month = 12
     day = 2
-    sequences = [28]
+    sequences = [28,31,32,34]
     cam = cam_vert1
-    SVD_selfclean_mod.SVD_selfclean(year,month,day,sequences,cam,bec2path,what_images=['PTAI_probe'])
+    SVD_selfclean_mod.SVD_selfclean(year,month,day,sequences,cam,settings.bec2path,what_images=['PTAI_probe'])
 except Exception as e:
     raise(e)
 

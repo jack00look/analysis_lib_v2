@@ -4,13 +4,11 @@ import importlib
 import datetime
 import pandas as pd
 
-import settings
+spec = importlib.util.spec_from_file_location("general_lib.settings", "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/general_lib/settings.py")
+settings = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(settings)
 
-importlib.reload(settings)
-
-from settings import bec2path
-
-def get_day_data(year,month,day,path = bec2path):
+def get_day_data(year,month,day,path = settings.bec2path):
     month = str(month).zfill(2)
     day = str(day).zfill(2)
     year = str(year)

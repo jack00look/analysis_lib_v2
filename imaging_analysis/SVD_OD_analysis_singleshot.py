@@ -13,7 +13,7 @@ try:
     year = 2024
     month = 12
     day = 2
-    SVD_sequence = 5
+    SVD_sequence = 12
     SVD_OD_analysis_mod.SVD_OD_analysis(lyse.path, cam_vert1, year, month, day, SVD_sequence)
 except Exception as e:
     raise('Error in SVD analysis for cam', cam_vert1['name'], ':', e)

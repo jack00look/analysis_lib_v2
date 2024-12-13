@@ -20,3 +20,16 @@ def get_lateral_region(image):
     x_min = 100
     x_max = 300
     return image[y_min:y_max,x_min:x_max]
+
+def get_two_lateral_regions(image):
+    y_center = np.shape(image)[0]//2
+    y_min = y_center - 50
+    y_max = y_center + 50
+    x1_min = 100
+    x1_max = 300
+    x2_min = np.shape(image)[1] - 300
+    x2_max = np.shape(image)[1] - 100
+    image_cut = np.zeros((2*50,400))
+    image_cut[:,:200] = image[y_min:y_max,x1_min:x1_max]
+    image_cut[:,200:] = image[y_min:y_max,x2_min:x2_max]
+    return image_cut

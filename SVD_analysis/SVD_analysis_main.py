@@ -22,8 +22,7 @@ spec = importlib.util.spec_from_file_location("general_lib.settings", "/home/ric
 settings = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(settings)
 
-
-reduce_image_func = SVD_analysis_reduce_mod.get_lateral_region
+reduce_image_func = SVD_analysis_reduce_mod.get_two_lateral_regions
 
 def SVD_training(year,month,day,sequences, camera,path=settings.bec2path,what_images = None,show_errs = False):
     
@@ -140,20 +139,31 @@ def reconstruct_probe(img_cut,invU,invS,Vh,all_probes_full, img_shape):
     return probe
 
 def analyze_SVD_h5file(h5file,cam,reduce_image_func,invU,invS,Vh,all_probes_full):
+    # get raw images
     images = imaging_analysis_lib_mod.get_raws_camera(h5file,cam)
+
+    # if no raw images, end analysis
+    if images is None:
+        return
+    
+    # get the names of the atoms images
     atoms_names = cam['atoms_images'].copy()
+
+    # for each atoms image, reconstruct the probe and save it
     OD = {}
     for atoms_name in atoms_names:
+
+        # if the atoms image is not in the raw images, skip it
         if atoms_name not in images.keys():
-            #print("Image " + atoms_name + " not found")
             continue
+
         try:
             img = images[atoms_name]
             img_cut = reduce_image_func(img)
             probe = reconstruct_probe(img_cut,invU,invS,Vh,all_probes_full, np.shape(img))
             general_lib_mod.save_data(h5file, 'results/raw/' + cam['name'] + '/' + atoms_name + '_SVDprobe' , probe)
         except Exception as e:
-            raise("Error in processing image " + atoms_name, '(' + str(e) + ')')
+            print("Error in processing image " + atoms_name, '(' + str(e) + ')')
 
 def get_probes(SVD_path,NAS_path,filenames_list,keys_list,cam):
     probes = []
