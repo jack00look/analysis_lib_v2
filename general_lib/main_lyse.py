@@ -8,7 +8,14 @@ spec = importlib.util.spec_from_file_location("general_lib.settings", "/home/ric
 settings = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(settings)
 
-def get_day_data(year,month,day,path = settings.bec2path):
+def get_day_data(today = True, year = None, month = None, day = None, path = settings.bec2path):
+    if today:
+        current_time = datetime.datetime.now()
+        year = current_time.year
+        month = current_time.month
+        day = current_time.day
+    if year is None or month is None or day is None:
+        print('Please specify year, month and day')
     month = str(month).zfill(2)
     day = str(day).zfill(2)
     year = str(year)

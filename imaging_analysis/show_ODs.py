@@ -1,68 +1,87 @@
 import h5py
-import lyse
 import importlib
 import matplotlib.pyplot as plt
 import numpy as np
+from fitting.models1D import ThomasFermi1DModel, Bimodal1DModel, Gaussian1DModel
+from lmfit_lyse_interface import parameters_dict_with_errors
+import traceback
+import time
 
-import camera_settings
-importlib.reload(camera_settings)
-from camera_settings import cameras
+spec = importlib.util.spec_from_file_location("imaging_analysis_lib.camera_settings", "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/imaging_analysis_lib/camera_settings.py")
+camera_settings = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(camera_settings)
 
 spec = importlib.util.spec_from_file_location("imaging_analysis_lib.main", "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/imaging_analysis_lib/main.py")
 imaging_analysis_lib_mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(imaging_analysis_lib_mod)
 
-vmin = -1
-vmax = 10
+spec = importlib.util.spec_from_file_location("general_lib.main", "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/general_lib/main.py")
+general_lib_mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(general_lib_mod)
 
-def plot_OD(img,key,ax,i,j):
-    fig_temp = ax[2*i,j+1].imshow(img,vmin=vmin,vmax = vmax,aspect='auto')
-    fig.colorbar(fig_temp,ax=ax[2*i,j+1])
-    ax[2*i,j+1].set_title(key)
-    OD_int_hor = np.sum(img,axis=0)
-    OD_int_vert = np.sum(img,axis=1)
-    ax[2*i+1,j+1].plot(OD_int_hor)
-    ax[2*i,j].plot(OD_int_vert,np.arange(len(OD_int_vert)))
-    ax[2*i,j].invert_xaxis()
-    ax[2*i+1,j+1].sharex(ax[2*i,j+1])
-    ax[2*i,j].sharey(ax[2*i,j+1])
-    ax[2*i+1,j].remove()
-    return ax
+cameras = camera_settings.cameras
 
-with h5py.File(lyse.path) as h5file:
-    for cam in cameras:
-        try:
-            images = imaging_analysis_lib_mod.get_images_camera(h5file,cam)
-            if images is None:
+def show_ODs(h5file,show=True):
+    infos_analysis = {}
+    try:
+        for cam_entry in cameras:
+            cam = cameras[cam_entry]
+
+            dict_images = imaging_analysis_lib_mod.get_images_camera_waxes(h5file,cam)
+            if dict_images is None:
                 continue
+
+            images = dict_images['images']
+            infos_images = dict_images['infos']
+
             keys = list(images.keys())
             if len(keys) == 0:
                 continue
-            SVD_keys = [key for key in keys if 'SVD' in key]
             normal_keys = [key for key in keys if 'SVD' not in key]
-
             L = len(normal_keys)
-            if SVD_keys != []:
-                fig,ax = plt.subplots(L*2,4,figsize=(L*6,12),constrained_layout=True,gridspec_kw={'width_ratios': [1, 2,1,2]})
-            else:
-                fig,ax = plt.subplots(L*2,2,figsize=(L*6,6),constrained_layout=True,gridspec_kw={'width_ratios': [1, 2]})
+
+            fig,ax = plt.subplots(L*2,2,figsize=(L*6,6),constrained_layout=True,gridspec_kw={'width_ratios': [1, 1]})
             for i in range(L):
-                j=0
-                img = images[normal_keys[i]]
                 key = normal_keys[i]
-                plot_OD(img,key,ax,i,j)
+                j=0
+                for key_infos in infos_images[key]:
+                    infos_analysis[key+'_'+key_infos] = infos_images[key][key_infos]
+                n1D_x,n1D_y = imaging_analysis_lib_mod.plot_OD(dict_images,key,cam,fig,ax,i,j)
+                infos_analysis[key+'_n1D_x'] = n1D_x
+                infos_analysis[key+'_n1D_y'] = n1D_y
+                #ax[2*i, 1].set_aspect(1)
+
                 if i>0:
                     ax[2*i,1].sharex(ax[0,1])
                     ax[2*i,1].sharey(ax[0,1])
-                if len(SVD_keys) > i:
-                    j=2
-                    img = images[SVD_keys[i]]
-                    key = SVD_keys[i]
-                    plot_OD(img,key,ax,i,j)
-                    if i>0:
-                        ax[2*i,3].sharex(ax[0,3])
-                        ax[2*i,3].sharey(ax[0,3])
             
-            fig.suptitle(cam['name'])
-        except Exception as e:
-            pass
+            detuning = h5file['globals'].attrs['probe_detuning_debug']/9.7946
+            tof = h5file['globals'].attrs['tof_debug']
+            title = 'CAM' + cam['name']
+            title += '\nDetuning. {:.2f} [Gamma], TOF: {:.2f} ms'.format(detuning,tof)
+            h5file_infos = general_lib_mod.get_h5file_infos(h5file.filename)
+            title += '\n' + h5file_infos['year'] + '/' + h5file_infos['month'] + '/' + h5file_infos['day']
+            title += '\n' + 'seq:' + h5file_infos['seq'] + '   ' + 'it:' + h5file_infos['it'] + '   ' + 'rep:' + h5file_infos['rep']
+            title += '\n' + h5file_infos['program_name']
+            fig.suptitle(title,fontsize=15)
+
+        return infos_analysis
+    except Exception as e:
+        print(traceback.format_exc())
+        return
+
+if __name__ == '__main__':
+    time_0 = time.time()
+    try:
+        import lyse
+        run = lyse.Run(lyse.path)
+        dict = None
+        with h5py.File(lyse.path,'r+') as h5file:
+            dict = show_ODs(h5file)
+        if dict is not None:
+            for key in dict:
+                run.save_result(key,dict[key])
+        print('Elapsed time: {:.2f} s'.format(time.time()-time_0))
+    except Exception as e:
+        print('Elapsed time: {:.2f} s'.format(time.time()-time_0))
+        print(traceback.format_exc())

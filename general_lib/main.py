@@ -19,6 +19,30 @@ def save_data(h5file, dataset_name,data, comment = None):
 
 # return Path object (pathlib) of a given h5 file
 # bec2path is the path to the bec2 folder containing the years folders of the sequence files
+
+def get_h5file_infos(filename):
+    try:
+        NAS_folder = 'NAS542_dataBEC2'
+        filename = filename.split(NAS_folder)[1]
+        year = (filename[1:5])
+        month = (filename[6:8])
+        day = (filename[9:11])
+        sequence = (filename[12:16])
+        filename = filename[28:]
+        if 'rep' in filename:
+            rep = (filename[-8:-3])
+            it = (filename[-16:-12])
+            program_name = filename[:-17]
+        else:
+            rep = 'None'
+            it = (filename[-7:-3])
+            program_name = filename[:-8]
+        dict = {'year':year,'month':month,'day':day,'seq':sequence,'it':it,'rep':rep,'program_name':program_name}
+        return dict
+    except Exception as e:
+        print("Error in get_h5file_infos_from_filename: " + str(e))
+        return
+
 def get_h5filename(year, month, day, sequence, it, bec2_path, rep=0,show_errs = False):
     try:
         path = Path(bec2_path)

@@ -13,15 +13,18 @@ spec = importlib.util.spec_from_file_location("general_lib.settings", "/home/ric
 settings = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(settings)
 
-import camera_settings
-importlib.reload(camera_settings)
-from camera_settings import cam_vert1,cam_hor1
+spec = importlib.util.spec_from_file_location("imaging_analysis_lib.camera_settings", "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/imaging_analysis_lib/camera_settings.py")
+camera_settings = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(camera_settings)
+
+cam_vert1 = camera_settings.cam_vert1
+cam_hor1 = camera_settings.cam_hor1
 
 try:
     year = 2024
     month = 12
-    day = 2
-    sequences = [28,31,32,34]
+    day = 17
+    sequences = [9,]
     cam = cam_vert1
     SVD_selfclean_mod.SVD_selfclean(year,month,day,sequences,cam,settings.bec2path,what_images=['PTAI_probe'])
 except Exception as e:

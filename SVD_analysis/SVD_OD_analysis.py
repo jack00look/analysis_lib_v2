@@ -2,7 +2,6 @@ import numpy as np
 import h5py
 import json
 import datetime
-import lyse
 import importlib
 import time
 import sys
