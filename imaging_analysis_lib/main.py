@@ -6,6 +6,8 @@ from numba import jit
 from scipy.ndimage import gaussian_filter
 import traceback
 import matplotlib.patches as patches
+from fitting.models import J_Flat2DModel
+from scipy.stats import f
 
 spec = importlib.util.spec_from_file_location("general_lib.main", "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/general_lib/main.py")
 general_lib_mod = importlib.util.module_from_spec(spec)
@@ -39,6 +41,12 @@ def do_fit_1D(y_vals,x_vals,MODEL,prefix,ax,invert = False):
 
 def do_fit_2D(Z_vals,X_vals,Y_vals,MODEL,prefix,ax,i,j):
 
+    flat_model = J_Flat2DModel(prefix=prefix)
+    p0_flat = flat_model.guess(Z_vals, X=X_vals, Y=Y_vals)
+    out_flat = flat_model.fit(Z_vals, p0_flat, X=X_vals, Y=Y_vals)
+    chisqr_flat = out_flat.chisqr
+    nfree_flat = out_flat.nfree
+
     ax_surface = ax[i,j]
     ax_x = ax[i+1,j]
     ax_y = ax[i,j-1]
@@ -56,6 +64,21 @@ def do_fit_2D(Z_vals,X_vals,Y_vals,MODEL,prefix,ax,i,j):
     guess_fit_y = np.sum(guess_fit, axis=1)
     
     fit_results = model.fit(Z_vals, p0, X=X_vals, Y=Y_vals)
+
+    chisqr = fit_results.chisqr
+    nfree = fit_results.nfree
+
+    F_test = (chisqr_flat - chisqr)/(nfree_flat - nfree) / (chisqr / nfree)
+    p_val = 1 - f.cdf(F_test, nfree_flat - nfree, nfree)
+    print('nfree flat: ',nfree_flat)
+    print('nfree model: ',nfree)
+    print('F_test value: ',F_test)
+    print('p-value: ',p_val)
+
+    F_test_threshold = 150.
+
+    is_flat = F_test < F_test_threshold
+
     best_fit = model.eval(fit_results.params, X=X_vals, Y=Y_vals)
     best_fit_x = np.sum(best_fit, axis=0)
     best_fit_y = np.sum(best_fit, axis=1)
@@ -75,7 +98,7 @@ def do_fit_2D(Z_vals,X_vals,Y_vals,MODEL,prefix,ax,i,j):
     ax[i+1,j-1].axis('off')
 
 
-    return fit_results
+    return fit_results, is_flat
 
 def get_axes(axes):
     axes_names = list(axes.keys())
@@ -319,10 +342,16 @@ def get_images_camera_waxes(h5file,cam,show_errs = False):
         images_raws = get_raws_camera(h5file,cam)
         if images_raws is None:
             return
-        detuning = (h5file['globals'].attrs['probe_detuning_debug']-2)/9.7946
+        try:
+            probe_det_0 = h5file['globals'].attrs['probe_detuning_0']
+        except:
+            probe_det_0 = 0
+            print('No probe_detuning_0 attribute found in globals, setting it to 0.')
+        detuning = (h5file['globals'].attrs['probe_detuning_debug'] - probe_det_0)/9.7946
         images = {}
         images_ODlog = {}
         infos = {}
+        keys_in_images = list(images_raws.keys())
         for key in atoms_keys:
             if key not in images_raws:
                 continue
@@ -338,8 +367,8 @@ def get_images_camera_waxes(h5file,cam,show_errs = False):
             
         
         px_size = cam['px_size']
-        x_ax_cam = np.arange(images[atoms_keys[0]].shape[1])*px_size
-        y_ax_cam = np.arange(images[atoms_keys[0]].shape[0])*px_size
+        x_ax_cam = np.arange(images[keys_in_images[0]].shape[1])*px_size
+        y_ax_cam = np.arange(images[keys_in_images[0]].shape[0])*px_size
         dict_axes_infos = get_axes_infos(cam)
         axis_image = {}
         axis_image[dict_axes_infos['name_1']] = x_ax_cam

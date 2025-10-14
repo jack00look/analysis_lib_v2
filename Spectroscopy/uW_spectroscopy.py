@@ -23,7 +23,7 @@ def F_rabi_spectroscopy(field,f0,f_rabi,t_pulse,amp,offset):
 
 rabi_model = Model(F_rabi_spectroscopy, independent_vars=['field'],nan_policy='omit' )
 
-seqs = [[66]]
+seqs = [[16]]
 
 
 if __name__ == '__main__':
@@ -31,22 +31,16 @@ if __name__ == '__main__':
         #df_orig = general_lib_lyse_mod.get_day_data(today = True)
         
         df_orig = lyse.data()
-        x_var = 'Bcompzfine_spectroscopy'
-        #x_var = ('plot_scope_traces','LEM_avg')
-        #x_var = 'uW_freq_m1m2'
-        #x_var = 'run repeat'
+        x_var = 'BCompZ_spectroscopy'
 
-        y_m1 = ('spectroscopy_atom_count', 'm1_fit')
-        y_m2 = ('spectroscopy_atom_count', 'm2_fit')
-        # y_m1 = ('atoms_sum', '-1')
-        # y_m2 = ('atoms_sum', '-2')
+        y_m1 = ('spectroscopy_atom_count', 'm1_Nfit')
+        y_m2 = ('spectroscopy_atom_count', 'm2_Nfit')
 
         y_uw_pulse = 'uW_pulse'
 
-        y_uW_amp_m1m2 = 'uW_amp_m1m2'
+        y_uW_amp = 'uW_amp'
 
-        fig, axes = plt.subplots(nrows = 2, tight_layout=True)
-        ax, ax1 = axes
+        fig, ax = plt.subplots(nrows = 1, tight_layout=True)
         ax.set_xlabel(x_var)
         ax.set_ylabel('Magnetization')
         ax.set_title('uW Spectroscopy Analysis')
@@ -68,7 +62,7 @@ if __name__ == '__main__':
             y_M_vals = (y_m2_vals - y_m1_vals) / y_Ntot_vals
 
             # Filter out values where Ntot is too low
-            mask = y_Ntot_vals > 2000
+            mask = y_Ntot_vals > 0
             Bcompzfine_values = Bcompzfine_values[mask]
             y_M_vals = y_M_vals[mask]
             y_m1_vals = y_m1_vals[mask]
@@ -83,24 +77,22 @@ if __name__ == '__main__':
                 raise ValueError(f"Multiple unique values found for {y_uw_pulse}: {uW_pulse_unique}, analysing sequences {s}")
             uW_pulse_val = uW_pulse_unique[0]
 
-            uW_amp_m1m2_vals = df[y_uW_amp_m1m2].values
-            uW_amp_m1m2_unique = np.unique(uW_amp_m1m2_vals)
-            if uW_amp_m1m2_unique.size != 1:
-                raise ValueError(f"Multiple unique values found for {y_uW_amp_m1m2}: {uW_amp_m1m2_unique}, analysing sequences {s}")
-            uW_amp_m1m2_val = uW_amp_m1m2_unique[0]
+            uW_amp_vals = df[y_uW_amp].values
+            uW_amp_unique = np.unique(uW_amp_vals)
+            if uW_amp_unique.size != 1:
+                raise ValueError(f"Multiple unique values found for {y_uW_amp}: {uW_amp_unique}, analysing sequences {s}")
+            uW_amp_val = uW_amp_unique[0]
 
             params = rabi_model.make_params()
             params['f0'].set(value=Bcompzfine_values[np.argmax(y_M_vals)], vary=True,min = 1,max = 142)
-            params['f_rabi'].set(value=0.5/(uW_pulse_val*1e-3)*1.3,vary=True, min=0,max = 1e5)
-            params['t_pulse'].set(value=uW_pulse_val/1000.*1.0, vary=False)
+            params['f_rabi'].set(value=0.5/(uW_pulse_val*1e-3),vary=True, min=0,max = 1e5)
+            params['t_pulse'].set(value=uW_pulse_val/1000., vary=False)
             params['amp'].set(value=1., vary=False, min=0., max=1.)
             params['offset'].set(value=0., vary=False,min = 0., max=2.)
-
-            data_label = 'Seq {} - uW pulse: {:.2f} ms, uW amp m1m2: {:.2f}'.format(s, uW_pulse_val, uW_amp_m1m2_val)
-            ax.plot(Bcompzfine_values, y_M_vals, 'o-',color=colors[seqs.index(s)], label= data_label)
-            ax1.plot(Bcompzfine_values, y_m1_vals, 'o',color='tab:blue', label= data_label)
-            ax1.plot(Bcompzfine_values, y_m2_vals, 'o',color='orange', label= data_label)
-            ax1.plot(Bcompzfine_values, y_m1_vals+y_m2_vals, 'o',color='black', label= data_label)
+            f0_D2_Na = 1.7716261288 * 1e9  # Hz
+            uW_freq = ((df['uW_freq'].values[0]*1e3 + 1.670*1e9) - f0_D2_Na)*1e-3 # kHz
+            data_label = 'Seq {} - uW freq = {:.2f} kHz, uW pulse: {:.2f} ms, uW amp: {:.2f}'.format(s, uW_freq,uW_pulse_val, uW_amp_val)
+            ax.plot(Bcompzfine_values, y_M_vals, 'o',color=colors[seqs.index(s)], label= data_label)
 
             ax.set_ylim(-1.05, 1.05)
 
@@ -108,7 +100,7 @@ if __name__ == '__main__':
             Bcomp_max = Bcompzfine_values.max()
             Bcompzfine_plot = np.linspace(Bcomp_min, Bcomp_max, 1000)
             
-            #ax.plot(Bcompzfine_plot, rabi_model.eval(field=Bcompzfine_plot, params=params), '--',color = colors[seqs.index(s)], alpha=0.5)
+            ax.plot(Bcompzfine_plot, rabi_model.eval(field=Bcompzfine_plot, params=params), '--',color = colors[seqs.index(s)], alpha=0.5)
 
             try:
                 fit = rabi_model.fit(y_M_vals, field=Bcompzfine_values, params=params)
@@ -121,7 +113,8 @@ if __name__ == '__main__':
                 print(f"Fit failed for sequence {s}: {e}")
                 ax.plot(Bcompzfine_values, y_M_vals, 'o-', color=colors[seqs.index(s)], label=f"{data_label} (fit failed)")
         
-        ax.legend()
+        # I want the legend to be outside the plot, below the x-axis    
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=1)
 
         
     except Exception as e:

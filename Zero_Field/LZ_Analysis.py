@@ -75,6 +75,11 @@ def Bcomp_complete(X,Bscan_center,Bother_res,sigma,cm1,Am1,c0,A0,cp1,Ap1):
     P[2*L:] = Ap1 * P[2*L:]**2 + cp1
     return P
 
+def Bcomp_m1(X,Bscan_center,Bother_res,sigma,Am1,cm1):
+    P = np.exp(-((X-Bscan_center)**2+Bother_res**2)/2./(2*sigma**2))
+    P = Am1*(1-P)**2 + cm1
+    return P
+
 def BZ_complete(X,A,B,x0,xc,tau):
     L = int(X.size/3.)
     P = np.zeros(3*L)
@@ -108,17 +113,23 @@ def p0_Bz(x,params):
     return 1 - P_m1 - P_p1
 
 Bcomp_model = Model(Bcomp_complete,independent_vars=['X'],nan_policy='omit')
+Bz_model = Model(BZ_complete,independent_vars=['X'],nan_policy='omit')
+Bcomp_m1_model = Model(Bcomp_m1,independent_vars=['X'],nan_policy='omit')
 
 if __name__ == '__main__':
     try:
         df = general_lib_lyse_mod.get_day_data(today = True)
 
-        seqs = [[25]]
+        seqs = [[74]]
 
         x_var_BCompY = 'BCompY'
         x_var_BCompZ = 'BCompZ_LZramp_end'
         x_var_BGradY = 'BGradY'
         x_var_BCompX = 'BCompX'
+
+        y_m1 = ('spinor_atom_count', 'm1_Nsum')
+        y_0 = ('spinor_atom_count', '_0_Nsum')
+        y_p1 = ('spinor_atom_count', 'p1_Nsum')
 
         y_m1 = ('spinor_atom_count', 'm1_Nfit')
         y_0 = ('spinor_atom_count', '_0_Nfit')
@@ -154,7 +165,6 @@ if __name__ == '__main__':
 
         for (index,seq) in enumerate(seqs):
             df_temp = df[(df['sequence_index'].isin(seq))]
-
 
             BCompX_vals = df_temp[x_var_BCompX].values
             BCompY_vals = df_temp[x_var_BCompY].values
@@ -224,11 +234,11 @@ if __name__ == '__main__':
                 Bz_end_min = df_temp['BCompZ_LZramp_end'].min()
                 Bz_end_max = df_temp['BCompZ_LZramp_end'].max()
                 # label +=  f'Bz: {Bz_start:.2f} -> ({Bz_end_min:.2f}, {Bz_end_max:.2f}) mG, @ {speed_Bz:.2f} mG/s'
-                label +=  f'Bz: {Bz_start:.3f} -> ({Bz_end_min:.3f}, {Bz_end_max:.3f}) mG, @ {speed_Bz:.3f} mG/s in {time_Bz_ramp:.3f} ms'
+                label +=  f'Bz: {Bz_start:.3f} -> ({Bz_end_min:.3f}, {Bz_end_max:.3f}) mG, @ {speed_Bz:.3f} mG/s'
             else:
                 Bz_end = df_temp['BCompZ_LZramp_end'].values[0]
                 #label += f'Bz: {Bz_start:.2f} -> {Bz_end:.2f} mG, @ {speed_Bz:.2f} mG/s'
-                label += f'Bz: {Bz_start:.3f} -> {Bz_end:.3f} mG, @ {speed_Bz:.3f} mG/s'
+                label += f'Bz: {Bz_start:.3f} -> {Bz_end:.3f} mG, @ {speed_Bz:.3f} mG/s in {time_Bz_ramp:.3f} ms'
                 label += '\n'
                 label += 'BCompX = {:.3f}'.format(BCompX_unique_val) if BCompX_unique_val is not None else ''
                 label += 'BCompY = {:.3f}'.format(BCompY_unique_val) if BCompY_unique_val is not None else ''
@@ -242,7 +252,7 @@ if __name__ == '__main__':
             x_vals_complete = np.array([x_vals,x_vals,x_vals])
 
             if x_var_name != 'BCompZ_LZramp_end':
-                params_start.add('Bscan_center', value=x_vals[np.argmax(p_p1_vals)], vary=True, min=-1., max=1.)
+                params_start.add('Bscan_center', value=x_vals[np.argmax(p_p1_vals)], vary=True, min=-3., max=3.)
                 params_start.add('Bother_res', value=0.0123, vary=True, min=0.00001, max=1.)
                 params_start.add('sigma', value=get_th_sigmaB(speed_Bz), vary=True, min=0.001, max=2.)
                 params_start.add('cm1', value=0.0, vary=False, min=-0.3, max=0.3)
@@ -251,6 +261,12 @@ if __name__ == '__main__':
                 params_start.add('A0', value=1., vary=False, min=0.1, max=1.5)
                 params_start.add('Am1', value=1., vary=False, min=0.1, max=1.5)
                 params_start.add('Ap1', value=1., vary=False, min=0.1, max=1.5)
+                params_start_m1 = Parameters()
+                params_start_m1.add('Bscan_center', value=x_vals[np.argmax(p_p1_vals)], vary=True, min=-1., max=1.)
+                params_start_m1.add('Bother_res', value=0.0123, vary=True, min=0.00001, max=1.)
+                params_start_m1.add('sigma', value=get_th_sigmaB(speed_Bz), vary=True, min=0.001, max=2.)
+                params_start_m1.add('cm1', value=0.0, vary=False, min=-0.3, max=0.3)
+                params_start_m1.add('Am1', value=1., vary=False, min=0.1, max=1.5)
                 ax[0].plot(x_fit, pm1(x_fit, params_start), '--', color=colors[index % len(colors)], label='Initial guess')
                 ax[1].plot(x_fit, p0(x_fit, params_start), '--', color=colors[index % len(colors)])
                 ax[2].plot(x_fit, pp1(x_fit, params_start), '--', color=colors[index % len(colors)])
@@ -262,22 +278,30 @@ if __name__ == '__main__':
                     ax[1].plot(x_fit, p0(x_fit, out.params), '-', color=colors[index % len(colors)])
                     ax[2].plot(x_fit, pp1(x_fit, out.params), '-', color=colors[index % len(colors)],label = label_p1)
                     print(out.fit_report())
+                    out_m1 = Bcomp_m1_model.fit(p_m1_vals,params_start_m1,X = x_vals, method = 'leastsq')
+                    #ax[0].plot(x_fit,pm1(x_fit,out_m1.params),'.-')
                 except Exception as e:
                     print(f'Fit failed for seq {seqs[index]}: {e}')
                     print(traceback.format_exc())
                     continue
 
             if x_var_name == 'BCompZ_LZramp_end':
-                ax[0].plot(x_fit, pm1(x_fit, params_start), '--', color=colors[index % len(colors)], label='Initial guess')
-                ax[1].plot(x_fit, p0(x_fit, params_start), '--', color=colors[index % len(colors)])
-                ax[2].plot(x_fit, pp1(x_fit, params_start), '--', color=colors[index % len(colors)])
+                params_start.add('A', value=0.9, vary=True, min=0.0, max=1.0)
+                params_start.add('B', value=0.1, vary=True, min=0.0, max=1.0)
+                params_start.add('x0', value=0.1, vary=True, min=-10., max=10.)
+                params_start.add('xc', value=4.5, vary=True, min=-10., max=10.)
+                params_start.add('tau', value=0.1, vary=True, min=0.001, max=2.)
+                ax[0].plot(x_fit, pm1_Bz(x_fit, params_start), '--', color=colors[index % len(colors)], label='Initial guess')
+                ax[1].plot(x_fit, p0_Bz(x_fit, params_start), '--', color=colors[index % len(colors)])
+                ax[2].plot(x_fit, pp1_Bz(x_fit, params_start), '--', color=colors[index % len(colors)])
                 try:
-                    out = Bcomp_model.fit(data,params_start,X = x_vals_complete,method='leastsq')
+                    out = Bz_model.fit(data,params_start,X = x_vals_complete,method='leastsq')
                     params_dict = out.params.valuesdict()
-                    label_p1 = 'Fit: Bscan_res={:.3f}, Bother_res={:.3f}, sigma_B={:.3f}'.format(params_dict["Bscan_center"],params_dict["Bother_res"],params_dict["sigma"])
-                    ax[0].plot(x_fit, pm1(x_fit, out.params), '-', color=colors[index % len(colors)])
-                    ax[1].plot(x_fit, p0(x_fit, out.params), '-', color=colors[index % len(colors)])
-                    ax[2].plot(x_fit, pp1(x_fit, out.params), '-', color=colors[index % len(colors)],label = label_p1)
+                    print(params_dict.keys())
+                    label_p1 = 'Fit: A={:.3f}, B={:.3f}, x0={:.3f}, xc={:.3f}, tau={:.3f}'.format(params_dict["A"],params_dict["B"],params_dict["x0"],params_dict["xc"],params_dict["tau"])
+                    ax[0].plot(x_fit, pm1_Bz(x_fit, out.params), '-', color=colors[index % len(colors)])
+                    ax[1].plot(x_fit, p0_Bz(x_fit, out.params), '-', color=colors[index % len(colors)])
+                    ax[2].plot(x_fit, pp1_Bz(x_fit, out.params), '-', color=colors[index % len(colors)],label = label_p1)
                     print(out.fit_report())
                 except Exception as e:
                     print(f'Fit failed for seq {seqs[index]}: {e}')

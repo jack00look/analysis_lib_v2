@@ -4,7 +4,7 @@ import importlib
 import matplotlib.pyplot as plt
 import numpy as np
 from fitting.models1D import ThomasFermi1DModel, Bimodal1DModel, Gaussian1DModel,J_BimodalBose1DModel2Centers
-from fitting.models import J_Gaussian2DModel
+from fitting.models import J_Gaussian2DModel,J_BimodalBose2DModel2Centers,J_Flat2DModel
 from lmfit_lyse_interface import parameters_dict_with_errors
 from lmfit import minimize, Parameters
 import scipy.ndimage
@@ -47,9 +47,9 @@ def spinor_atom_count(h5file,show=True):
     imaging_analysis_lib_mod.plot_OD(dict_images,key,cam,fig,ax,0,0)
 
     centers = {
-        'm1': (3.4e-3,4.26e-3),
-        '_0': (3.42e-3,2.54e-3),
-        'p1': (3.46e-3,1.0e-3)
+        'm1': (3.407e-3,4.177e-3),
+        '_0': (3.431e-3,3.000e-3),
+        'p1': (3.462e-3,1.952e-3)
     }
 
     side_halflength_hor = 0.8e-3
@@ -77,9 +77,12 @@ def spinor_atom_count(h5file,show=True):
         dict.update({key_state+'_Nsum': n2D_fit.sum()})
 
         X,Y = np.meshgrid(x_fit,y_fit)
-        out = imaging_analysis_lib_mod.do_fit_2D(n2D_fit, X, Y, J_Gaussian2DModel, key_state+'_', ax_fits,2*i,1)
+        out, is_flat = imaging_analysis_lib_mod.do_fit_2D(n2D_fit, X, Y, J_BimodalBose2DModel2Centers, key_state+'_', ax_fits,2*i,1)
         fit_results = out.params.valuesdict()
-        dict.update({key_state+'_Nfit': fit_results[key_state+'_N']})
+        if is_flat:
+            dict.update({key_state+'_Nfit': 0.})
+        else:
+            dict.update({key_state+'_Nfit': fit_results[key_state+'_N']})
 
         ax[0,1].add_patch(Rectangle((x0-side_halflength_hor,y0-side_halflength_vert),2*side_halflength_hor,2*side_halflength_vert,fill=False,zorder=10,color = 'g',ls = '--',lw=2))
     return dict

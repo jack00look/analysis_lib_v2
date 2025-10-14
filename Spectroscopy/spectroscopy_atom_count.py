@@ -19,6 +19,10 @@ spec = importlib.util.spec_from_file_location("imaging_analysis_lib.main", "/hom
 imaging_analysis_lib_mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(imaging_analysis_lib_mod)
 
+spec = importlib.util.spec_from_file_location("general_lib.main", "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/general_lib/main.py")
+general_lib_mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(general_lib_mod)
+
 cameras = camera_settings.cameras
 
 
@@ -39,6 +43,9 @@ def spectroscopy_atom_count(h5file,show=True):
         return
 
     fig,ax = plt.subplots(2,2,figsize=(10,10),constrained_layout=True)
+
+    fig.suptitle(general_lib_mod.get_title(h5file,cam),fontsize=15)
+
     fig_fits,ax_fits = plt.subplots(ncols=2,nrows=4,figsize=(10,5),constrained_layout=True)
     dict = {}
     # get the image and the ODlog image for the key
@@ -48,15 +55,10 @@ def spectroscopy_atom_count(h5file,show=True):
 
     centers = {
         'm1': (3.35e-3,4.2e-3),
-        'm2': (3.4e-3,1.84e-3)
+        'm2': (3.48e-3,1.02e-3)
     }
 
     side_halflength = 0.9e-3
-
-    N_m1_fit = 0
-    N_m2_fit = 0
-    N_m1_sum = 0
-    N_m2_sum = 0
 
     dict = {}
 
@@ -76,35 +78,26 @@ def spectroscopy_atom_count(h5file,show=True):
 
         # get the number of atoms in the state
         n_atoms = np.sum(n2D[ind_y_min:ind_y_max+1,ind_x_min:ind_x_max+1])
-        dict.update({key_state+'_Natoms': n_atoms})
+        dict.update({key_state+'_Nsum': n_atoms})
 
 
         x_fit = x_vals[ind_x_min:ind_x_max+1]
         y_fit = y_vals[ind_y_min:ind_y_max+1]
         n2D_fit = n2D[ind_y_min:ind_y_max+1,ind_x_min:ind_x_max+1]
         X, Y = np.meshgrid(x_fit, y_fit)
-        out = imaging_analysis_lib_mod.do_fit_2D(n2D_fit, X, Y, J_Gaussian2DModel, key_state+'_', ax_fits,2*i,1)
+        out, is_flat = imaging_analysis_lib_mod.do_fit_2D(n2D_fit, X, Y, J_Gaussian2DModel, key_state+'_', ax_fits,2*i,1)
 
         params_dict = out.params.valuesdict()
-        if key_state == 'm1':
-            N_m1_fit = params_dict[key_state+'_N']
-            N_m1_sum = n_atoms
-        elif key_state == 'm2':
-            N_m2_fit = params_dict[key_state+'_N']
-            N_m2_sum = n_atoms
 
+        if is_flat:
+            dict.update({key_state+'_Nfit': 0.})
+        else:
+            dict.update({key_state+'_Nfit': params_dict[key_state+'_N']})
 
-        dict.update({key_state+'_fit': out.params.valuesdict()[key_state+'_N']})
-        dict.update({key_state+'_sx': out.params.valuesdict()[key_state+'_sx']})
-        dict.update({key_state+'_sy': out.params.valuesdict()[key_state+'_sy']})
-        dict.update({key_state+'_var': out.params.valuesdict()[key_state+'_var']})
-        dict.update({key_state+'_redchi': out.result.redchi})
+        dict.update({key_state+'_sx': params_dict[key_state+'_sx']})
+        dict.update({key_state+'_sy': params_dict[key_state+'_sy']})
+        dict.update({key_state+'_var': params_dict[key_state+'_var']})
         ax[0,1].add_patch(Rectangle((x0-side_halflength,y0-side_halflength),2*side_halflength,2*side_halflength,fill=False,zorder=10,color = 'blue',ls = '--',lw=4))
-
-    M_sum = (N_m2_sum - N_m1_sum) / (N_m2_sum + N_m1_sum)
-    dict.update({'M_sum': M_sum})
-    M_fit = (N_m2_fit - N_m1_fit) / (N_m2_fit + N_m1_fit)
-    dict.update({'M_fit': M_fit})
 
     
     return dict

@@ -24,23 +24,23 @@ def F_rabi_oscillations(t_pulse,delta,f_rabi,tau_decoherence,amp,offset, phi):
 
 rabi_model = Model(F_rabi_oscillations, independent_vars=['t_pulse'],nan_policy='omit' )
 
-seqs = [[26]]
+seqs = [[28,31]]
 
 if __name__ == '__main__':
     try:
         df_orig = general_lib_lyse_mod.get_day_data(today = True)
+        df_orig = lyse.data()
 
         x_var = 'uW_pulse'
 
-        y_m1 = ('spectroscopy_atom_count', 'm1_Nfit')
-        y_m2 = ('spectroscopy_atom_count', 'm2_Nfit')
+        y_m0 = ('spinor_atom_count', '_0_Nfit')
 
         y_Bcompzfine = 'BCompZ_spectroscopy'
 
         y_uW_amp = 'uW_amp'
         fig, ax = plt.subplots(nrows = 1, tight_layout=True)
         ax.set_xlabel(x_var)
-        ax.set_ylabel('Magnetization')
+        ax.set_ylabel('n0')
         ax.set_title('uW Rabi Oscillations Analysis')
 
         colors = ['C0', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9']
@@ -56,17 +56,17 @@ if __name__ == '__main__':
             t_pulse_vals = df[x_var].values
 
         
-            y_m1_vals = df[y_m1].values
-            y_m2_vals = df[y_m2].values
-            y_Ntot_vals = y_m1_vals + y_m2_vals
-            y_M_vals = (y_m2_vals - y_m1_vals) / y_Ntot_vals
+            y_m0_vals = df[y_m0].values
+            y_M_vals = ((y_m0_vals) / y_m0_vals.max())*2-1
 
+            print(y_M_vals)
+            print(t_pulse_vals)
         
             Bcompzfine_vals = df[y_Bcompzfine].values
 
-            mask = y_Ntot_vals > 0
-            Bcompzfine_vals = Bcompzfine_vals[mask]
-            y_M_vals = y_M_vals[mask]
+            #mask = y_m0_vals > 0
+            #Bcompzfine_vals = Bcompzfine_vals[mask]
+            #y_M_vals = y_M_vals[mask]
 
             Bcompzfine_unique = np.unique(Bcompzfine_vals)
             if Bcompzfine_unique.size != 1:
@@ -81,7 +81,7 @@ if __name__ == '__main__':
 
             params = rabi_model.make_params()
             params['delta'].set(value=0.00,vary=False)
-            params['f_rabi'].set(value=700.135,vary=True, min=0,max = 2e5)
+            params['f_rabi'].set(value=2000.135,vary=True, min=0,max = 2e5)
             params['amp'].set(value=1., vary=False, min=0., max=2.)
             params['offset'].set(value=0., vary=False,min = -1., max=1.)
             params['phi'].set(value=-np.pi, vary=False)
@@ -90,7 +90,7 @@ if __name__ == '__main__':
             t_pulse_vals = t_pulse_vals[ind_sorted]
             y_M_vals = y_M_vals[ind_sorted]
 
-            data_label = 'Seq {} - Bcompzfine: {:.2f} mG, uW amp: {:.2f}'.format(s, Bcompzfine_val, uW_amp_val)
+            data_label = 'Seq {} - Bcompzfine: {:.2f} ms, uW amp: {:.2f}'.format(s, Bcompzfine_val, uW_amp_val)
             ax.scatter(t_pulse_vals, y_M_vals, color=colors[seqs.index(s)], s=20,label= data_label)
 
             tpulse_min = t_pulse_vals.min()

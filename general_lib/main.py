@@ -42,6 +42,17 @@ def get_h5file_infos(filename):
     except Exception as e:
         print("Error in get_h5file_infos_from_filename: " + str(e))
         return
+    
+def get_title(h5file,cam):
+    detuning = h5file['globals'].attrs['probe_detuning_debug']/9.7946
+    tof = h5file['globals'].attrs['tof_debug']
+    title = 'CAM' + cam['name']
+    title += '\nDetuning. {:.2f} [Gamma], TOF: {:.2f} ms'.format(detuning,tof)
+    h5file_infos = get_h5file_infos(h5file.filename)
+    title += '\n' + h5file_infos['year'] + '/' + h5file_infos['month'] + '/' + h5file_infos['day']
+    title += '\n' + 'seq:' + h5file_infos['seq'] + '   ' + 'it:' + h5file_infos['it'] + '   ' + 'rep:' + h5file_infos['rep']
+    title += '\n' + h5file_infos['program_name']
+    return title
 
 def get_h5filename(year, month, day, sequence, it, bec2_path, rep=0,show_errs = False):
     try:

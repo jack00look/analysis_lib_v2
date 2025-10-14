@@ -14,9 +14,9 @@ if __name__ == '__main__':
     try:
         df = general_lib_lyse_mod.get_day_data(today = True)
 
-        seqs = [78]
+        seqs = [19,20]
         x_var = 'hold_time_debug'
-        y_var = ('BEC_fit_hor', 'yfit_r_tf')
+        y_var = ('BEC_fit_hor', 'atomsyfit_c_tf')
 
         f_init = 2 #kHz
 
@@ -27,6 +27,7 @@ if __name__ == '__main__':
 
         fig,ax = plt.subplots(tight_layout=True) 
         ax.plot(x, y, 'o')
+    
 
         model = ExpressionModel(expr="amp * cos(2*pi*freq * x + phi) + offset",
                                 independent_vars=['x'],
