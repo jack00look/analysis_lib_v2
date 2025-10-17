@@ -6,9 +6,17 @@ import h5py
 import importlib
 import sys
 from lmfit import Model
-spec = importlib.util.spec_from_file_location("general_lib.main", "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/general_lib/main_lyse.py")
+import getpass
+username = getpass.getuser()
+analysis_lib_v2_folder = "/home/{}/labscript-suite/userlib/analysislib/analysis_lib_v2".format(username)
+print("{}/general_lib/main_lyse.py".format(analysis_lib_v2_folder))
+
+spec = importlib.util.spec_from_file_location("general_lib.main", "{}/general_lib/main_lyse.py".format(analysis_lib_v2_folder))
+print(spec)
 general_lib_lyse_mod = importlib.util.module_from_spec(spec)
+print(general_lib_lyse_mod)
 spec.loader.exec_module(general_lib_lyse_mod)
+print('general_lib_lyse_mod imported')
 
 
 '''Plots a waterfall plot of the magnetization of the cloud as a function of a certain variable (y_axis) discarding repetitions'''

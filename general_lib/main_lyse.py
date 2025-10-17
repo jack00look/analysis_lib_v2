@@ -3,17 +3,22 @@ import os
 import importlib
 import datetime
 import pandas as pd
+import getpass
+username = getpass.getuser()
+analysis_lib_v2_folder = "/home/{}/labscript-suite/userlib/analysislib/analysis_lib_v2".format(username)
 
-spec = importlib.util.spec_from_file_location("general_lib.settings", "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/general_lib/settings.py")
+spec = importlib.util.spec_from_file_location("general_lib.settings", "{}/general_lib/settings.py".format(analysis_lib_v2_folder))
 settings = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(settings)
 
-def get_day_data(today = True, year = None, month = None, day = None, path = settings.bec2path):
+bec_data_path = "/home/{}/NAS542/data".format(username)
+
+def get_day_data(today = True, year = None, month = None, day = None, path =bec_data_path,bec = 2):
     if today:
         current_time = datetime.datetime.now()
         year = current_time.year
         month = current_time.month
-        day = current_time.day
+        day = current_time.day 
     if year is None or month is None or day is None:
         print('Please specify year, month and day')
     month = str(month).zfill(2)
