@@ -24,7 +24,7 @@ def F_rabi_oscillations(t_pulse,delta,f_rabi,tau_decoherence,amp,offset, phi):
 
 rabi_model = Model(F_rabi_oscillations, independent_vars=['t_pulse'],nan_policy='omit' )
 
-seqs = [[26]]
+seqs = [[28]]
 
 if __name__ == '__main__':
     try:
@@ -38,6 +38,7 @@ if __name__ == '__main__':
         y_Bcompzfine = 'BCompZ_spectroscopy'
 
         y_uW_amp = 'uW_amp'
+        y_uW_DAC_amp = 'uW_100WDAC'
         fig, ax = plt.subplots(nrows = 1, tight_layout=True)
         ax.set_xlabel(x_var)
         ax.set_ylabel('Magnetization')
@@ -61,13 +62,7 @@ if __name__ == '__main__':
             y_Ntot_vals = y_m1_vals + y_m2_vals
             y_M_vals = (y_m2_vals - y_m1_vals) / y_Ntot_vals
 
-        
             Bcompzfine_vals = df[y_Bcompzfine].values
-
-            mask = y_Ntot_vals > 0
-            Bcompzfine_vals = Bcompzfine_vals[mask]
-            y_M_vals = y_M_vals[mask]
-
             Bcompzfine_unique = np.unique(Bcompzfine_vals)
             if Bcompzfine_unique.size != 1:
                 raise ValueError(f"Multiple unique values found for {y_Bcompzfine}: {Bcompzfine_unique}, analysing sequences {s}")
@@ -79,9 +74,15 @@ if __name__ == '__main__':
                 raise ValueError(f"Multiple unique values found for {y_uW_amp}: {uW_amp_unique}, analysing sequences {s}")
             uW_amp_val = uW_amp_unique[0]
 
+            uW_DAC_amp_vals = df[y_uW_DAC_amp].values
+            uW_DAC_amp_unique = np.unique(uW_DAC_amp_vals)
+            if uW_DAC_amp_unique.size != 1:
+                raise ValueError(f"Multiple unique values found for {y_uW_DAC_amp}: {uW_DAC_amp_unique}, analysing sequences {s}")
+            uW_DAC_amp_val = uW_DAC_amp_unique[0]
+
             params = rabi_model.make_params()
             params['delta'].set(value=0.00,vary=False)
-            params['f_rabi'].set(value=700.135,vary=True, min=0,max = 2e5)
+            params['f_rabi'].set(value=1500.135,vary=True, min=0,max = 2e5)
             params['amp'].set(value=1., vary=False, min=0., max=2.)
             params['offset'].set(value=0., vary=False,min = -1., max=1.)
             params['phi'].set(value=-np.pi, vary=False)
@@ -90,12 +91,12 @@ if __name__ == '__main__':
             t_pulse_vals = t_pulse_vals[ind_sorted]
             y_M_vals = y_M_vals[ind_sorted]
 
-            data_label = 'Seq {} - Bcompzfine: {:.2f} mG, uW amp: {:.2f}'.format(s, Bcompzfine_val, uW_amp_val)
+            data_label = 'Seq {} - Bcompzfine: {:.2f} mG, uW DDS amp: {:.2f}, uW DAC amp: {:.4f}'.format(s, Bcompzfine_val, uW_amp_val,uW_DAC_amp_val)
             ax.scatter(t_pulse_vals, y_M_vals, color=colors[seqs.index(s)], s=20,label= data_label)
 
             tpulse_min = t_pulse_vals.min()
             tpulse_max = t_pulse_vals.max()
-            tpulse_plot = np.linspace(tpulse_min, tpulse_max, 1000)
+            tpulse_plot = np.linspace(tpulse_min, tpulse_max, 10000)
           
             
             ax.plot(tpulse_plot, rabi_model.eval(t_pulse=tpulse_plot, params=params), '--',color = colors[seqs.index(s)], alpha=0.5)
@@ -107,7 +108,8 @@ if __name__ == '__main__':
 
             ax.plot(tpulse_plot, fit.eval(t_pulse=tpulse_plot,params=best_params), ls = '-', color=colors[seqs.index(s)],label = fit_label)
         
-        ax.legend()
+        ax.legend(loc='lower left')
+        ax.legend(loc="upper center",bbox_to_anchor=(0.5, -0.15))
 
         
     except Exception as e:

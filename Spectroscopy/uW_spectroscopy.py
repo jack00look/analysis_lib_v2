@@ -23,7 +23,7 @@ def F_rabi_spectroscopy(field,f0,f_rabi,t_pulse,amp,offset):
 
 rabi_model = Model(F_rabi_spectroscopy, independent_vars=['field'],nan_policy='omit' )
 
-seqs = [[16]]
+seqs = [[21,22,23]]
 
 
 if __name__ == '__main__':
@@ -37,6 +37,8 @@ if __name__ == '__main__':
         y_m2 = ('spectroscopy_atom_count', 'm2_Nfit')
 
         y_uw_pulse = 'uW_pulse'
+
+        y_DAC100W = 'uW_100WDAC'
 
         y_uW_amp = 'uW_amp'
 
@@ -83,6 +85,12 @@ if __name__ == '__main__':
                 raise ValueError(f"Multiple unique values found for {y_uW_amp}: {uW_amp_unique}, analysing sequences {s}")
             uW_amp_val = uW_amp_unique[0]
 
+            DAC100W_vals = df[y_DAC100W].values
+            DAC100W_unique = np.unique(DAC100W_vals)
+            if DAC100W_unique.size != 1:
+                raise ValueError(f"Multiple unique values found for {y_DAC100W}: {DAC100W_unique}, analysing sequences {s}")
+            DAC100W_val = DAC100W_unique[0]
+
             params = rabi_model.make_params()
             params['f0'].set(value=Bcompzfine_values[np.argmax(y_M_vals)], vary=True,min = 1,max = 142)
             params['f_rabi'].set(value=0.5/(uW_pulse_val*1e-3),vary=True, min=0,max = 1e5)
@@ -91,7 +99,7 @@ if __name__ == '__main__':
             params['offset'].set(value=0., vary=False,min = 0., max=2.)
             f0_D2_Na = 1.7716261288 * 1e9  # Hz
             uW_freq = ((df['uW_freq'].values[0]*1e3 + 1.670*1e9) - f0_D2_Na)*1e-3 # kHz
-            data_label = 'Seq {} - uW freq = {:.2f} kHz, uW pulse: {:.2f} ms, uW amp: {:.2f}'.format(s, uW_freq,uW_pulse_val, uW_amp_val)
+            data_label = 'Seq {} - uW freq = {:.2f} kHz, uW pulse: {:.3f} ms, uW amp: {:.2f}, DAC100W: {:.4f}'.format(s, uW_freq, uW_pulse_val, uW_amp_val,DAC100W_val)
             ax.plot(Bcompzfine_values, y_M_vals, 'o',color=colors[seqs.index(s)], label= data_label)
 
             ax.set_ylim(-1.05, 1.05)
@@ -105,7 +113,7 @@ if __name__ == '__main__':
             try:
                 fit = rabi_model.fit(y_M_vals, field=Bcompzfine_values, params=params)
                 print(fit.fit_report()) 
-                fit_label = 'FIT f_rabi: {:.2f} Hz, f0: {:.2f} mG'.format(fit.params['f_rabi'].value, fit.params['f0'].value)
+                fit_label = 'FIT f_rabi: {:.2f} Hz, f0: {:.3f} mG'.format(fit.params['f_rabi'].value, fit.params['f0'].value)
 
                 ax.plot(Bcompzfine_plot, fit.eval(field=Bcompzfine_plot,params = fit.params), ls = '--', color=colors[seqs.index(s)],label = fit_label)
 

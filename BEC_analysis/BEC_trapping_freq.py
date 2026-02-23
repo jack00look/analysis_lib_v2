@@ -14,7 +14,7 @@ if __name__ == '__main__':
     try:
         df = general_lib_lyse_mod.get_day_data(today = True)
 
-        seqs = [19,20]
+        seqs = [31]
         x_var = 'hold_time_debug'
         y_var = ('BEC_fit_hor', 'atomsyfit_c_tf')
 

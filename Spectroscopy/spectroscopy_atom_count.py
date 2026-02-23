@@ -54,8 +54,8 @@ def spectroscopy_atom_count(h5file,show=True):
     imaging_analysis_lib_mod.plot_OD(dict_images,key,cam,fig,ax,0,0)
 
     centers = {
-        'm1': (3.35e-3,4.2e-3),
-        'm2': (3.48e-3,1.02e-3)
+        'm1': (3.4e-3,4.33e-3),
+        'm2': (3.4e-3,1.23e-3)
     }
 
     side_halflength = 0.9e-3

@@ -15,19 +15,12 @@ try:
     df = general_lib_lyse_mod.get_day_data(today = True)
     #df = general_lib_lyse_mod.get_day_data(year = 2024, month = 9,day=24)
 
-    seqs = [3]
+    seqs = [2]
     df = df[(df['sequence_index'].isin(seqs))]
 
-    y_var = 'N_tot'
-    y_m1 = ('atoms_sum', '-1')
-    y_m2 = ('atoms_sum', '-2')
-    y_Natoms = ('MOT_fit','xfit_N')
-    y_Natoms = ('BEC_fit_hor','atomsxfit_N_bec')
-    y= df[y_Natoms].values
+    y_var = ('BEC_fit_hor', 'PTAI_m1xfit_c_tf')
+    y= df[y_var].values*1e6
     y_var_1 = ('plo')
-    #y_m1_vals = df[y_m1].values
-    #y_m2_vals = df[y_m2].values
-    #y = (y_m2_vals - y_m1_vals) / (y_m2_vals + y_m1_vals)
     y_repeats = df['run time'].values
     y_repeats_local = pd.to_datetime(y_repeats).tz_localize('UTC').tz_convert('Europe/Rome')
     print(y_repeats[0])
@@ -56,6 +49,9 @@ try:
 
     title = Path(__file__).name
     title += '\n' + 'seqs: ' + str(seqs)
+    title += '\n' + 'y_var: ' + str(y_var)
+    title += '\n' + 'Avg Y value: {:.3e}'.format(y.mean())
+    title += '\n' + 'Std Y value: {:.3e}'.format(y.std())
     fig.suptitle(title)
 except Exception as e:
         print(traceback.format_exc())

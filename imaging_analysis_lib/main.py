@@ -6,8 +6,12 @@ from numba import jit
 from scipy.ndimage import gaussian_filter
 import traceback
 import matplotlib.patches as patches
+import sys
+import os
+# Add the analysislib_v2 directory to the path
 from fitting.models import J_Flat2DModel
 from scipy.stats import f
+from scipy.ndimage import rotate
 
 spec = importlib.util.spec_from_file_location("general_lib.main", "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/general_lib/main.py")
 general_lib_mod = importlib.util.module_from_spec(spec)
@@ -18,7 +22,7 @@ fontsize_mine = 12
 def extract_images_parts(dict_images,cam,key):
     n2D = dict_images['images'][key]
     axes = dict_images['axes']
-    x_vals, y_vals, X_name, Y_name = get_axes(axes)
+    x_vals, y_vals, X_name, Y_name,inverted = get_axes(axes)
     n1D_x, n1D_y = get_n1Ds(n2D,cam)
     return n2D, n1D_x, n1D_y, x_vals, y_vals
 
@@ -102,11 +106,16 @@ def do_fit_2D(Z_vals,X_vals,Y_vals,MODEL,prefix,ax,i,j):
 
 def get_axes(axes):
     axes_names = list(axes.keys())
-    X_name = axes_names[0]
-    Y_name = axes_names[1]
+    print('Axes names before ordering: ',axes_names)
+    order = np.array(['x','y','z'])
+    axes_names_ordered = sorted(axes_names, key=lambda name: np.where(order == name)[0][0])
+    print('Axes names order: ',axes_names_ordered)
+    inverted = (axes_names[0] != axes_names_ordered[0])
+    X_name = axes_names_ordered[0]
+    Y_name = axes_names_ordered[1]
     x_vals = axes[X_name]
     y_vals = axes[Y_name]
-    return x_vals, y_vals, X_name, Y_name
+    return x_vals, y_vals, X_name, Y_name,inverted
 
 def get_n1Ds(n_2D,cam):
     OD_int_hor = np.sum(n_2D,axis=0)*cam['px_size']
@@ -164,7 +173,7 @@ def plot_OD(dict_images,key,cam,fig,ax,i,j):
     roi_integration = cam['roi_integration']
     n1D_x, n1D_y = get_n1Ds(n2D[roi_integration],cam)
     axes = dict_images['axes']
-    x_vals, y_vals, X_name, Y_name = get_axes(axes)
+    x_vals, y_vals, X_name, Y_name,inverted = get_axes(axes)
     y_vals_1D = y_vals.copy()
     x_vals_1D = x_vals.copy()
     X_1D,Y_1D = np.meshgrid(x_vals_1D,y_vals_1D)
@@ -172,13 +181,35 @@ def plot_OD(dict_images,key,cam,fig,ax,i,j):
     Y_1D = Y_1D[roi_integration]
     x_vals_1D = X_1D[0,:]
     y_vals_1D = Y_1D[:,0]
+    print(len(x_vals_1D))
+    print(len(y_vals_1D))
     roi_back_xmin, roi_back_xmax, roi_back_ymin, roi_back_ymax = get_roiback_edges(cam,x_vals,y_vals)
     roi_int_xmin, roi_int_xmax, roi_int_ymin, roi_int_ymax = get_roi_integration(cam,x_vals,y_vals)
     X,Y = np.meshgrid(x_vals,y_vals)
     X_name += ' [m]'
     Y_name += ' [m]'
 
-    fig_temp = ax[2*i,j+1].pcolormesh(X,Y,ODlog,vmin = 0,vmax = 1.5,cmap = 'gist_stern')
+    method = cam['method']
+
+    if method == 'absorption':
+        Z = ODlog
+        #Z = rotate(Z,6.5,reshape=False)
+        vmin = 0.
+        vmax = 1e14
+        cmap = 'gist_stern'
+    if method == 'phase_contrast':
+        Z = ODlog -1.
+        #Z = rotate(Z,6.5,reshape=False)
+        vmin = -1.
+        vmax = 1.
+        cmap = 'RdBu'
+
+    print('axes inverted: ',inverted)
+    if inverted:
+        Z = Z.T
+        n1D_x,n1D_y = n1D_y,n1D_x
+
+    fig_temp = ax[2*i,j+1].pcolormesh(X,Y,Z,vmin = vmin,vmax = vmax,cmap = cmap)
     cbar = fig.colorbar(fig_temp,ax=ax[2*i,j+1])
     cbar.set_label('ln(I_in/I_out)',fontsize=fontsize_mine)
     rect = patches.Rectangle((roi_back_xmin,roi_back_ymin),roi_back_xmax-roi_back_xmin,roi_back_ymax-roi_back_ymin,linewidth=3,edgecolor='g',facecolor='none',linestyle='--')
@@ -226,7 +257,9 @@ def plot_dmd(dict_images,key,cam,fig,ax,i,j,a = None,b = None):
     dmd_x_arr = dmd_x_arr[ind_dmd_in_atoms]
     ax[i,j].plot(dmd_x_arr,dmd_y_arr)
 
-def calculate_OD(atoms, probe, cam, back = None, roi_background=None,alpha = None, chi_sat = None, pulse_time = None,detuning = 0):
+def calculate_OD(atoms, probe, cam, back = None, roi_background=None,alpha = None, chi_sat = None, pulse_time = None,detuning = 0, method='absorption'):
+
+    method = cam['method']
 
     # sigma is the cross section of the atoms, used to compute the 2D density
     sigma = 1.656425e-13 #m2
@@ -245,15 +278,21 @@ def calculate_OD(atoms, probe, cam, back = None, roi_background=None,alpha = Non
     cnt_atoms_back = np.sum(atoms<back_max)/px_number
     cnt_probe_sat = np.sum(probe>sat_min)/px_number
     cnt_atoms_sat = np.sum(atoms>sat_min)/px_number
+    flag_atoms_sat = cnt_atoms_sat > 0.001
+    flag_probe_sat = cnt_probe_sat > 0.001
 
     # subtract the background
-    atoms = atoms - back
-    probe = probe - back
+    atoms_diff = np.subtract(atoms, back,dtype=np.int64)
+    probe_diff = np.subtract(probe, back,dtype=np.int64)
+    atoms = np.maximum(atoms_diff, 0)
+    probe = np.maximum(probe_diff, 0)
     
 
     # normalize the probe to the atoms
     roi_background = cam['roi_back']
     probe = probe * (atoms[roi_background].mean()/probe[roi_background].mean())
+    probe_back_avg = probe[roi_background].mean()
+    atoms_back_avg = atoms[roi_background].mean()
     probe = probe.clip(1)
     atoms = atoms.clip(1)
 
@@ -265,35 +304,47 @@ def calculate_OD(atoms, probe, cam, back = None, roi_background=None,alpha = Non
     # compute figure of merit for the normalization, if roi_background is good then error_norm should be small
     error_norm = np.sqrt(np.sum(((atoms[roi_background]-probe[roi_background])**2/(np.sqrt(2)*probe[roi_background]))))/roi_background_size
 
-    # get the parameters of the camera
-    alpha = cam['alpha']
-    chi_sat = cam['chi_sat']
-    pulse_time = cam['pulse_time']
+    if method == 'absorption':
 
-    # compute the 2D density
-    OD_log_bare = np.log( (np.array(probe).clip(1)) / (np.array(atoms).clip(1))  )
-    OD_log = OD_log_bare * alpha * (1 + (2*detuning)**2)
-    OD_lin = (probe -  atoms) / (chi_sat * pulse_time)
-    n_2D = (OD_log + OD_lin)/sigma
+        # get the parameters of the camera
+        alpha = cam['alpha']
+        chi_sat = cam['chi_sat']
+        pulse_time = cam['pulse_time']
 
-    OD_lin_sum = np.sum(OD_lin)
-    OD_log_sum = np.sum(OD_log)
-    OD_log_bare_sum = np.sum(OD_log_bare)
+        # compute the 2D density
+        OD_log_bare = np.log( (np.array(probe).clip(1)) / (np.array(atoms).clip(1))  )
+        OD_log = OD_log_bare * alpha * (1 + (2*detuning)**2)
+        OD_lin = (probe -  atoms) / (chi_sat * pulse_time)
+        n_2D = (OD_log + OD_lin)/sigma
 
-    # compute the number of atoms
-    pixel_size = cam['px_size']
-    N = np.sum(n_2D)*pixel_size**2
+        OD_lin_sum = np.sum(OD_lin)
+        OD_log_sum = np.sum(OD_log)
+        OD_log_bare_sum = np.sum(OD_log_bare)
 
-    dict_infos = {'OD_log_bare_sum':OD_log_bare_sum,
-                  'OD_lin_sum':OD_lin_sum,
-                  'N_atoms':N,
-                  'probe_norm_err':error_norm,
-                  'OD_log_sum':OD_log_sum,
-                  'cnt_rel_probe_back':cnt_probe_back,
-                  'cnt_rel_atoms_back':cnt_atoms_back,
-                  'cnt_rel_probe_sat':cnt_probe_sat,
-                  'cnt_rel_atoms_sat':cnt_atoms_sat
-                  }
+        # compute the number of atoms
+        pixel_size = cam['px_size']
+        N = np.sum(n_2D)*pixel_size**2
+
+        dict_infos = {'OD_log_bare_sum':OD_log_bare_sum,
+                    'OD_lin_sum':OD_lin_sum,
+                    'N_atoms':N,
+                    'probe_norm_err':error_norm,
+                    'OD_log_sum':OD_log_sum,
+                    'cnt_rel_probe_back':cnt_probe_back,
+                    'cnt_rel_atoms_back':cnt_atoms_back,
+                    'cnt_rel_probe_sat':cnt_probe_sat,
+                    'cnt_rel_atoms_sat':cnt_atoms_sat,
+                    'flag_probe_sat':flag_probe_sat,
+                    'flag_atoms_sat':flag_atoms_sat
+                    }
+        
+    if method == 'phase_contrast':
+        print('Phase contrast imaging OD calculation')
+        # compute the 2D density
+        OD_log_bare = (np.array(atoms).clip(1)) / (np.array(probe).clip(1))
+        n_2D = (OD_log_bare)
+
+        dict_infos = {}
     
     return n_2D,dict_infos,OD_log_bare
 
@@ -351,7 +402,6 @@ def get_images_camera_waxes(h5file,cam,show_errs = False):
         images = {}
         images_ODlog = {}
         infos = {}
-        keys_in_images = list(images_raws.keys())
         for key in atoms_keys:
             if key not in images_raws:
                 continue
@@ -363,12 +413,12 @@ def get_images_camera_waxes(h5file,cam,show_errs = False):
                 continue
             images[key] = n_2D
             infos[key] = dict_infos
-            images_ODlog[key] = OD_log_bare
+            images_ODlog[key] = n_2D
             
-        
+        images_keys = list(images.keys())
         px_size = cam['px_size']
-        x_ax_cam = np.arange(images[keys_in_images[0]].shape[1])*px_size
-        y_ax_cam = np.arange(images[keys_in_images[0]].shape[0])*px_size
+        x_ax_cam = np.arange(images[images_keys[0]].shape[1])*px_size
+        y_ax_cam = np.arange(images[images_keys[0]].shape[0])*px_size
         dict_axes_infos = get_axes_infos(cam)
         axis_image = {}
         axis_image[dict_axes_infos['name_1']] = x_ax_cam

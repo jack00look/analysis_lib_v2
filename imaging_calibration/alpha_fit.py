@@ -16,12 +16,13 @@ spec = importlib.util.spec_from_file_location("imaging_analysis_lib.camera_setti
 camera_settings = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(camera_settings)
 
-cam = camera_settings.cam_vert1
+cam = camera_settings.cameras['cam_vert1']
 
 
-df = lyse_mod.get_day_data(today=False,year=2024, month=12, day=17)
+df = lyse_mod.get_day_data(today=True,year=2024, month=12, day=17)
+df = lyse.data()
 
-seqs = [9,10]
+seqs = [49,50]
 # select only images without saturation
 df = df[df['sequence_index'].isin(seqs)]
 Clin = df[('Clin_Clog_measure', 'Clin')].values

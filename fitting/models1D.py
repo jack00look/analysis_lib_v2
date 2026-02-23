@@ -455,6 +455,7 @@ class J_BimodalBose1DModel2Centers(Model1D):
         expressions = {self.prefix+'N_th': f'{self.prefix}amp_g * sqrt(2*pi) * {self.prefix}s_g * 1.2020569',
                        self.prefix+'N_bec': f'16/15*{self.prefix}r_tf*{self.prefix}amp_tf',
                        self.prefix+'N_tot': f'{self.prefix}N_th + {self.prefix}N_bec',
+                       self.prefix+'N_ratio': f'{self.prefix}N_bec / {self.prefix}N_tot',
                        }
         for k, expr in expressions.items():
             self.set_param_hint(k, expr=expr)

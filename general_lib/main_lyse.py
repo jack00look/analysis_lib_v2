@@ -7,11 +7,11 @@ import getpass
 username = getpass.getuser()
 analysis_lib_v2_folder = "/home/{}/labscript-suite/userlib/analysislib/analysis_lib_v2".format(username)
 
-spec = importlib.util.spec_from_file_location("general_lib.settings", "{}/general_lib/settings.py".format(analysis_lib_v2_folder))
-settings = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(settings)
+# spec = importlib.util.spec_from_file_location("general_lib.settings", "{}/general_lib/settings.py".format(analysis_lib_v2_folder))
+# settings = importlib.util.module_from_spec(spec)
+# spec.loader.exec_module(settings)
 
-bec_data_path = "/home/{}/NAS542/data".format(username)
+bec_data_path = "/home/{}/NAS542_dataBEC2".format(username)
 
 def get_day_data(today = True, year = None, month = None, day = None, path =bec_data_path,bec = 2):
     if today:

@@ -22,6 +22,7 @@ print('general_lib_lyse_mod imported')
 '''Plots a waterfall plot of the magnetization of the cloud as a function of a certain variable (y_axis) discarding repetitions'''
 ''' scan can be 'ARP_Forward', 'ARP_Backward' or 'bubbles' '''
 ''' data_origin can be 'od_remove_thpart' or 'spin_waves' '''
+''' use constraints to filter df, e.g. constraints={'ARPKZ_omega_ramp_time': 0.5} '''
 
 def edge_func(x, x0, A,B, m,c):
        val = A/np.pi*np.arctan(B*(x-x0))+m*(x-x0)+c
