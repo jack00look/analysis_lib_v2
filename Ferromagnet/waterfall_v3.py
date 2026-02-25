@@ -219,7 +219,7 @@ try:
     #waterfall_plot(df,[36],'ARP_Forward','spin_waves',title_labels=['CigarV','Cigar_end'],constraints={'Cigar_end':[0.01]},average=False) #od_remove_thpart,spin_waves
     #waterfall_plot(df,[73],'ARP_Forward','show_ODs',title_labels=[],constraints={},average=False) #od_remove_thpart,spin_waves
     #waterfall_plot(df_orig,[29],'ARP_Backward','show_ODs',title_labels=[],constraints={},average=False) #od_remove_thpart
-    waterfall_plot(df_orig,[109],'ARP_Backward','show_ODs',title_labels=[],constraints={},average=False) #od_remove_thpart,spin_waves
+    waterfall_plot(df_orig,[80],'ARP_Forward','show_ODs',title_labels=[],constraints={},average=False) #od_remove_thpart,spin_waves
 
 
 except Exception as e:

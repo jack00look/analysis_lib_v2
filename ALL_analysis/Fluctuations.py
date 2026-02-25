@@ -15,7 +15,7 @@ try:
     df = general_lib_lyse_mod.get_day_data(today = True)
     #df = general_lib_lyse_mod.get_day_data(year = 2024, month = 9,day=24)
 
-    seqs = [2]
+    seqs = [25]
     df = df[(df['sequence_index'].isin(seqs))]
 
     y_var = ('BEC_fit_hor', 'PTAI_m1xfit_c_tf')

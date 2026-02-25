@@ -23,7 +23,7 @@ def F_rabi_spectroscopy(field,f0,f_rabi,t_pulse,amp,offset):
 
 rabi_model = Model(F_rabi_spectroscopy, independent_vars=['field'],nan_policy='omit' )
 
-seqs = [[21,22,23]]
+seqs = [[92]]
 
 
 if __name__ == '__main__':

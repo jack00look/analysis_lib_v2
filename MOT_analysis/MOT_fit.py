@@ -21,7 +21,7 @@ spec.loader.exec_module(imaging_analysis_lib_mod)
 cameras = camera_settings.cameras
 
 
-cam_name = 'cam_hor3'
+cam_name = 'cam_hor1'
 key = 'atoms'
 
 # cam_name = 'cam_vert1'

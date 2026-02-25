@@ -24,7 +24,7 @@ def F_rabi_oscillations(t_pulse,delta,f_rabi,tau_decoherence,amp,offset, phi):
 
 rabi_model = Model(F_rabi_oscillations, independent_vars=['t_pulse'],nan_policy='omit' )
 
-seqs = [[28]]
+seqs = [[93,94]]
 
 if __name__ == '__main__':
     try:
@@ -82,7 +82,7 @@ if __name__ == '__main__':
 
             params = rabi_model.make_params()
             params['delta'].set(value=0.00,vary=False)
-            params['f_rabi'].set(value=1500.135,vary=True, min=0,max = 2e5)
+            params['f_rabi'].set(value=300.135,vary=True, min=0,max = 2e5)
             params['amp'].set(value=1., vary=False, min=0., max=2.)
             params['offset'].set(value=0., vary=False,min = -1., max=1.)
             params['phi'].set(value=-np.pi, vary=False)
