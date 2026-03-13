@@ -106,10 +106,8 @@ def do_fit_2D(Z_vals,X_vals,Y_vals,MODEL,prefix,ax,i,j):
 
 def get_axes(axes):
     axes_names = list(axes.keys())
-    print('Axes names before ordering: ',axes_names)
     order = np.array(['x','y','z'])
     axes_names_ordered = sorted(axes_names, key=lambda name: np.where(order == name)[0][0])
-    print('Axes names order: ',axes_names_ordered)
     inverted = (axes_names[0] != axes_names_ordered[0])
     X_name = axes_names_ordered[0]
     Y_name = axes_names_ordered[1]
@@ -181,8 +179,6 @@ def plot_OD(dict_images,key,cam,fig,ax,i,j):
     Y_1D = Y_1D[roi_integration]
     x_vals_1D = X_1D[0,:]
     y_vals_1D = Y_1D[:,0]
-    print(len(x_vals_1D))
-    print(len(y_vals_1D))
     roi_back_xmin, roi_back_xmax, roi_back_ymin, roi_back_ymax = get_roiback_edges(cam,x_vals,y_vals)
     roi_int_xmin, roi_int_xmax, roi_int_ymin, roi_int_ymax = get_roi_integration(cam,x_vals,y_vals)
     X,Y = np.meshgrid(x_vals,y_vals)
@@ -195,7 +191,7 @@ def plot_OD(dict_images,key,cam,fig,ax,i,j):
         Z = ODlog
         #Z = rotate(Z,6.5,reshape=False)
         vmin = 0.
-        vmax = 1e14
+        vmax = 1.5e14
         cmap = 'gist_stern'
     if method == 'phase_contrast':
         Z = ODlog -1.
@@ -204,7 +200,6 @@ def plot_OD(dict_images,key,cam,fig,ax,i,j):
         vmax = 1.
         cmap = 'RdBu'
 
-    print('axes inverted: ',inverted)
     if inverted:
         Z = Z.T
         n1D_x,n1D_y = n1D_y,n1D_x
@@ -282,8 +277,16 @@ def calculate_OD(atoms, probe, cam, back = None, roi_background=None,alpha = Non
     flag_probe_sat = cnt_probe_sat > 0.001
 
     # subtract the background
-    atoms_diff = np.subtract(atoms, back,dtype=np.int64)
-    probe_diff = np.subtract(probe, back,dtype=np.int64)
+    # Check if images are already float (e.g., from SVD reconstruction)
+    if probe.dtype == np.float64 or probe.dtype == np.float32:
+        # SVD probe is already processed, just subtract without dtype conversion
+        atoms_diff = np.subtract(atoms.astype(np.float64), back.astype(np.float64))
+        probe_diff = np.subtract(probe, back.astype(np.float64))
+    else:
+        # Normal case: integer raw images
+        atoms_diff = np.subtract(atoms, back, dtype=np.int64)
+        probe_diff = np.subtract(probe, back, dtype=np.int64)
+    
     atoms = np.maximum(atoms_diff, 0)
     probe = np.maximum(probe_diff, 0)
     
@@ -383,6 +386,84 @@ def get_axes_infos(cam):
     invert_2 = img_ax_2[ind_2] < 0
     dict = {'name_1':name_1,'name_2':name_2,'invert_1':invert_1,'invert_2':invert_2}
     return dict
+
+def get_images_camera_waxes_SVD(h5file,cam,show_errs = False):
+    """
+    Get images using SVD-reconstructed probes instead of actual probe.
+    Looks for 'atomsname_SVDprobe' in results/raw/camname/
+    """
+    try:
+        atoms_keys = cam['atoms_images'].copy()
+        probe_key = cam['probe_image']
+        background_key = cam['background_image']
+        
+        images_raws = get_raws_camera(h5file,cam)
+        if images_raws is None:
+            return
+        
+        # Check if SVD probes exist
+        cam_raws_h5name = 'results/raw/' + cam['name']
+        if cam_raws_h5name not in h5file:
+            if show_errs:
+                print(f"No SVD results found for {cam['name']}")
+            return
+        
+        try:
+            probe_det_0 = h5file['globals'].attrs['probe_detuning_0']
+        except:
+            probe_det_0 = 0
+            print('No probe_detuning_0 attribute found in globals, setting it to 0.')
+        detuning = (h5file['globals'].attrs['probe_detuning_debug'] - probe_det_0)/9.7946
+        images = {}
+        images_ODlog = {}
+        infos = {}
+        for key in atoms_keys:
+            if key not in images_raws:
+                continue
+            
+            # Look for SVD probe
+            svd_probe_key = cam_raws_h5name + '/' + key + '_SVDprobe'
+            if svd_probe_key not in h5file:
+                if show_errs:
+                    print(f"No SVD probe found for {key}")
+                continue
+            
+            try:
+                svd_probe = np.array(h5file[svd_probe_key])
+                n_2D,dict_infos,OD_log_bare = calculate_OD(images_raws[key], svd_probe, cam, images_raws[background_key],detuning=detuning)
+            except Exception as e:
+                print("Error in calculating OD with SVD probe for " + key + " in cam " + cam['name'], e)
+                print(traceback.format_exc())
+                continue
+            images[key+'_SVD'] = n_2D
+            infos[key+'_SVD'] = dict_infos
+            images_ODlog[key+'_SVD'] = n_2D
+            
+        if len(images) == 0:
+            return
+            
+        images_keys = list(images.keys())
+        px_size = cam['px_size']
+        x_ax_cam = np.arange(images[images_keys[0]].shape[1])*px_size
+        y_ax_cam = np.arange(images[images_keys[0]].shape[0])*px_size
+        dict_axes_infos = get_axes_infos(cam)
+        axis_image = {}
+        axis_image[dict_axes_infos['name_1']] = x_ax_cam
+        axis_image[dict_axes_infos['name_2']] = y_ax_cam
+        for key in images:
+            if dict_axes_infos['invert_1']:
+                images[key] = images[key][:,::-1]
+                images_ODlog[key] = images_ODlog[key][:,::-1]
+            if dict_axes_infos['invert_2']:
+                images[key] = images[key][::-1,:]
+                images_ODlog[key] = images_ODlog[key][::-1,:]
+        dmd_raw_data = get_raws_dmd(h5file,show_errs)
+        dict = {'images':images,'axes':axis_image,'infos':infos,'images_ODlog':images_ODlog,'raws_dmd':dmd_raw_data}
+        return dict
+    except Exception as e:
+        print("Error in getting SVD images with axes from cam" + cam['name'] + ": " + str(e))
+        print(traceback.format_exc())
+        return
 
 def get_images_camera_waxes(h5file,cam,show_errs = False):
     try:

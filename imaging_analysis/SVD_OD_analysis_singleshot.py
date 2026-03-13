@@ -9,15 +9,16 @@ spec = importlib.util.spec_from_file_location("imaging_analysis_lib.camera_setti
 camera_settings = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(camera_settings)
 
-cam_vert1 = camera_settings.cam_vert1
-cam_hor1 = camera_settings.cam_hor1
+cam_vert1 = camera_settings.cameras['cam_vert1']
+cam_hor1 = camera_settings.cameras['cam_hor1']
 
 try:
-    year = 2024
-    month = 12
-    day = 17
-    SVD_sequence = 0
-    SVD_OD_analysis_mod.SVD_OD_analysis(lyse.path, cam_vert1, year, month, day, SVD_sequence)
+    year = 2026
+    month = 3
+    day = 10
+    SVD_sequence = 24
+    alpha = 0.0  # Set to 0.2-0.3 for hybrid approach (blend with current probe)
+    SVD_OD_analysis_mod.SVD_OD_analysis(lyse.path, cam_vert1, year, month, day, SVD_sequence, alpha=alpha)
 except Exception as e:
     raise('Error in SVD analysis for cam', cam_vert1['name'], ':', e)
 

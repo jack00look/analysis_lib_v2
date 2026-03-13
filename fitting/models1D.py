@@ -503,7 +503,6 @@ class J_BimodalBose1DModel2Centers(Model1D):
     def plot_best(self,params,X,ax,invert=False):
         Y_th, Y_bec = self.eval_bimodal_components(params,X)
         offset = params[f'{self.prefix}offset'].value
-        print(offset)
         Y_tot = Y_th + Y_bec - offset
         if invert:
             ax.plot(Y_tot,X,'r-',label='fit')

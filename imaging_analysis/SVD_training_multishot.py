@@ -9,17 +9,20 @@ SVD_training_mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(SVD_training_mod)
 
 
-cam_vert1 = camera_settings.cam_vert1
-cam_hor1 = camera_settings.cam_hor1
+cam_vert1 = camera_settings.cameras['cam_vert1']
+cam_hor1 = camera_settings.cameras['cam_hor1']
 
 
 try:
-    year = 2024
-    month = 12
-    day = 17
-    sequences = [9,10,11,12,13,14,15,16]
-    what_images = ['PTAI_probe']
-    SVD_training_mod.SVD_training_save(year,month,day,sequences,cam_vert1,what_images=what_images)
+    year = 2026
+    month = 3
+    day = 10
+    sequences = [1]
+    what_images = ['PTAI_probe','PTAI_m1']
+    # Use corners with custom size
+    reduce_func_name = 'get_corners_custom'
+    reduce_func_params = {'vert_size': 10, 'hor_size': 700}
+    SVD_training_mod.SVD_training_save(year,month,day,sequences,cam_vert1,what_images=what_images,reduce_func_name=reduce_func_name,reduce_func_params=reduce_func_params)
 except Exception as e:
     raise(e)
 

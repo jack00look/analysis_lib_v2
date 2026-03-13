@@ -55,7 +55,7 @@ def spectroscopy_atom_count(h5file,show=True):
 
     centers = {
         'm1': (3.4e-3,4.33e-3),
-        'm2': (3.4e-3,1.23e-3)
+        'm2': (3.4e-3,2.0e-3)
     }
 
     side_halflength = 0.9e-3

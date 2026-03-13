@@ -172,7 +172,6 @@ def skewedgaussian1d(X, amp, m, s, gamma, offset = 0):
 skew_gauss = Model(skewedgaussian1d, independent_vars = ['X'], nan_policy = 'omit')
 
 params = skew_gauss.make_params()
-print(params)
 params['m'].set(value=6)
 params['amp'].set(value=1200000)
 params['s'].set(value=10)
@@ -181,7 +180,6 @@ params['offset'].set(value = 100000)
 
 
 fit = skew_gauss.fit(OD_tot, X=probe, params=params)
-print(fit.best_fit)
 #
 #p0['skewed_Y_amp'].set(value = fittedPY['y_amp'].value)
 #p0['skewed_Y_m'].set(value = fittedPY['y_m'].value)
@@ -191,12 +189,9 @@ print(fit.best_fit)
 # resultS.plot(show_init = True)
 # #run.save_results_dict(parameters_dict_with_errors(resultS.params))
 # print(resultS.fit_report())
-print(fit.fit_report())
 fig,ax=plt.subplots()
 ax.plot(x,N,'o')
 ax.plot(x, fit.best_fit)
 ax.plot(x,fit.init_fit)
-print(x[fit.best_fit.argmax()])
-
 
 plt.tight_layout()

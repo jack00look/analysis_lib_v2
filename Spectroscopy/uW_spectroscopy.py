@@ -23,7 +23,7 @@ def F_rabi_spectroscopy(field,f0,f_rabi,t_pulse,amp,offset):
 
 rabi_model = Model(F_rabi_spectroscopy, independent_vars=['field'],nan_policy='omit' )
 
-seqs = [[92]]
+seqs = [[12]]
 
 
 if __name__ == '__main__':
@@ -32,6 +32,7 @@ if __name__ == '__main__':
         
         df_orig = lyse.data()
         x_var = 'BCompZ_spectroscopy'
+        x_var='ARPKZ_final_set_field'
 
         y_m1 = ('spectroscopy_atom_count', 'm1_Nfit')
         y_m2 = ('spectroscopy_atom_count', 'm2_Nfit')

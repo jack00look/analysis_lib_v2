@@ -49,7 +49,15 @@ def get_SVD_savepath(year,month,day,SVD_number,path):
     return path
 
 
-def SVD_OD_analysis(h5filepath,cam,year,month,day,SVD_number,path = settings.bec2path):
+def SVD_OD_analysis(h5filepath,cam,year,month,day,SVD_number,path = settings.bec2path,alpha=0.0):
+    """
+    Run SVD analysis on a single shot.
+    
+    Parameters:
+    -----------
+    alpha : float, optional
+        Blending weight for hybrid reconstruction (0.0 = pure SVD, 0.2-0.3 recommended for hybrid)
+    """
 
     SVD_path = get_SVD_savepath(year,month,day,SVD_number,path)
 
@@ -66,6 +74,9 @@ def SVD_OD_analysis(h5filepath,cam,year,month,day,SVD_number,path = settings.bec
     invU = np.load(SVD_path / 'invU.npy')
     invS = np.load(SVD_path / 'invS.npy')
     Vh = np.load(SVD_path / 'Vh.npy')
+    
+    # Get the training image shape from infos
+    training_shape = tuple(infos['ROI'])  # (shape_y, shape_x)
 
     all_probes_full_path = Path(SVD_path / 'all_probes_full.npy')
     all_probes_full = None
@@ -77,9 +88,9 @@ def SVD_OD_analysis(h5filepath,cam,year,month,day,SVD_number,path = settings.bec
         all_probes_full = SVD_main_mod.get_probes(SVD_path,path,filenames_list,keys_list,cam)
     
 
-    with h5py.File(h5filepath) as h5file:
+    with h5py.File(h5filepath,'r+') as h5file:
         try:
-            SVD_main_mod.analyze_SVD_h5file(h5file,cam,reduce_image_mod.reduce_image_func,invU,invS,Vh,all_probes_full)
+            SVD_main_mod.analyze_SVD_h5file(h5file,cam,reduce_image_mod.reduce_image_func,invU,invS,Vh,all_probes_full,training_shape,alpha=alpha)
             cam_raws_h5name = 'results/raw/' + cam['name']
             if cam_raws_h5name in h5file:
                 h5file[cam_raws_h5name].attrs['comment'] = 'SVD done with ' + str(SVD_path) + ' SVD dataset'

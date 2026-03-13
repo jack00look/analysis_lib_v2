@@ -25,7 +25,15 @@ warning_script_name = "/home/rick/labscript-suite/userlib/analysislib/analysisli
 
 cameras = camera_settings.cameras
 
-def show_ODs(h5file,show=True):
+def show_ODs(h5file,show=True,show_SVD=True):
+    """
+    Show OD images from h5 file.
+    
+    Parameters:
+    -----------
+    show_SVD : bool, optional
+        If True, also show OD images computed with SVD-reconstructed probes (default: True)
+    """
     infos_analysis = {}
     try:
         for cam_entry in cameras:
@@ -34,6 +42,15 @@ def show_ODs(h5file,show=True):
             dict_images = imaging_analysis_lib_mod.get_images_camera_waxes(h5file,cam)
             if dict_images is None:
                 continue
+
+            # Also get SVD images if available and requested
+            dict_images_SVD = None
+            if show_SVD:
+                dict_images_SVD = imaging_analysis_lib_mod.get_images_camera_waxes_SVD(h5file,cam)
+                if dict_images_SVD is not None:
+                    print(f"Found SVD images: {list(dict_images_SVD['images'].keys())}")
+                else:
+                    print(f"No SVD images found for camera {cam['name']}")
 
             images = dict_images['images']
             infos_images = dict_images['infos']
@@ -44,7 +61,9 @@ def show_ODs(h5file,show=True):
             normal_keys = [key for key in keys if 'SVD' not in key]
             L = len(normal_keys)
 
+            # Create figure for normal ODs
             fig,ax = plt.subplots(L*2,2,figsize=(L*6,6),constrained_layout=True,gridspec_kw={'width_ratios': [1, 1]})
+            print(f"Creating normal OD figure with {L} images, {L*2} rows of subplots")
             for i in range(L):
                 key = normal_keys[i]
                 print('Processing key:',key)
@@ -63,7 +82,6 @@ def show_ODs(h5file,show=True):
                 infos_analysis[key[5:]+'_1d'] = n1D_x
 
                 infos_analysis[key+'_n1D_y'] = n1D_y
-                #ax[2*i, 1].set_aspect(1)
 
                 if i>0:
                     ax[2*i,1].sharex(ax[0,1])
@@ -71,6 +89,42 @@ def show_ODs(h5file,show=True):
                               
             title = general_lib_mod.get_title(h5file,cam)
             fig.suptitle(title,fontsize=12)
+            
+            # Create separate figure for SVD ODs if available
+            if dict_images_SVD is not None:
+                images_svd = dict_images_SVD['images']
+                infos_images_svd = dict_images_SVD['infos']
+                svd_keys = list(images_svd.keys())
+                L_svd = len(svd_keys)
+                
+                if L_svd > 0:
+                    fig_svd,ax_svd = plt.subplots(L_svd*2,2,figsize=(L_svd*6,6),constrained_layout=True,gridspec_kw={'width_ratios': [1, 1]})
+                    print(f"Creating SVD OD figure with {L_svd} images, {L_svd*2} rows of subplots")
+                    
+                    for i in range(L_svd):
+                        key = svd_keys[i]
+                        print('Processing SVD key:',key)
+                        j=0
+                        for key_infos in infos_images_svd[key]:
+                            infos_analysis[key+'_'+key_infos] = infos_images_svd[key][key_infos]
+                        n1D_x,n1D_y = imaging_analysis_lib_mod.plot_OD(dict_images_SVD,key,cam,fig_svd,ax_svd,i,j)
+                        infos_analysis[key+'_n1D_x'] = n1D_x
+                        x_vals = np.arange(len(n1D_x))
+                        y_vals = np.arange(len(n1D_y))
+                        com_x = np.sum(n1D_x*x_vals)/np.sum(n1D_x)
+                        com_y = np.sum(n1D_y*y_vals)/np.sum(n1D_y)
+                        infos_analysis[key+'_com_x'] = com_x
+                        infos_analysis[key+'_com_y'] = com_y
+
+                        infos_analysis[key+'_n1D_x'] = n1D_x
+                        infos_analysis[key+'_n1D_y'] = n1D_y
+
+                        if i>0:
+                            ax_svd[2*i,1].sharex(ax_svd[0,1])
+                            ax_svd[2*i,1].sharey(ax_svd[0,1])
+                    
+                    title_svd = general_lib_mod.get_title(h5file,cam) + "\n[SVD Reconstructed Probes]"
+                    fig_svd.suptitle(title_svd,fontsize=12)
 
         for key in infos_analysis:
             if 'flag' in key:

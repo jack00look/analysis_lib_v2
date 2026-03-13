@@ -24,7 +24,21 @@ spec.loader.exec_module(settings)
 
 reduce_image_func = SVD_analysis_reduce_mod.get_two_lateral_regions
 
-def SVD_training(year,month,day,sequences, camera,path=settings.bec2path,what_images = None,show_errs = False):
+def SVD_training(year,month,day,sequences, camera,path=settings.bec2path,what_images = None,show_errs = False,reduce_func_name='get_two_lateral_regions',reduce_func_params=None):
+    
+    # Select the reduce function
+    if reduce_func_name == 'get_corners_custom':
+        if reduce_func_params is None:
+            reduce_func_params = {'vert_size': 20, 'hor_size': 100}
+        reduce_image_func = lambda img: SVD_analysis_reduce_mod.get_corners_custom(img, **reduce_func_params)
+    elif reduce_func_name == 'get_two_lateral_regions':
+        reduce_image_func = SVD_analysis_reduce_mod.get_two_lateral_regions
+    elif reduce_func_name == 'get_lateral_region':
+        reduce_image_func = SVD_analysis_reduce_mod.get_lateral_region
+    elif reduce_func_name == 'get_corners':
+        reduce_image_func = SVD_analysis_reduce_mod.get_corners
+    else:
+        raise ValueError(f"Unknown reduce_func_name: {reduce_func_name}")
     
     filenames_sequence = general_lib_mod.get_ordered_multiple_sequences(year,month,day,sequences,path,show_reps=True,show_errs=show_errs)
 
@@ -61,6 +75,7 @@ def SVD_training(year,month,day,sequences, camera,path=settings.bec2path,what_im
                 if not shape_found:
                     shape_y, shape_x = np.shape(probe)
                     shape_found = True
+                    print(f'Training image shape: {shape_y} x {shape_x} pixels')
                 if shape_found:
                     if np.shape(probe) != (shape_y,shape_x):
                         print('Error in probe shape in file ' + filename)
@@ -100,7 +115,7 @@ def SVD_training(year,month,day,sequences, camera,path=settings.bec2path,what_im
     invU = np.linalg.inv(U)
     print('Inversion done')
 
-    return invU, invS, Vh, all_probes_full,shape_x,shape_y,filenames_list,keys_list,reduce_image_func
+    return invU, invS, Vh, all_probes_full,shape_x,shape_y,filenames_list,keys_list,reduce_image_func,reduce_func_name,reduce_func_params
 
 def make_SVD_savepath(year,month,day,path):
     path = Path(path)
@@ -138,7 +153,19 @@ def reconstruct_probe(img_cut,invU,invS,Vh,all_probes_full, img_shape):
     probe = np.reshape(np.dot(np.transpose(proj), np.dot(invS,np.dot(invU,all_probes_full))), img_shape)
     return probe
 
-def analyze_SVD_h5file(h5file,cam,reduce_image_func,invU,invS,Vh,all_probes_full):
+def analyze_SVD_h5file(h5file,cam,reduce_image_func,invU,invS,Vh,all_probes_full,training_shape,alpha=0.0):
+    """
+    Analyze h5 file and reconstruct probe images using SVD.
+    
+    Parameters:
+    -----------
+    training_shape : tuple
+        Shape (height, width) of training images for proper reconstruction
+    alpha : float, optional
+        Blending weight between SVD reconstruction and actual probe
+        0.0 = pure SVD (default), 1.0 = pure actual probe
+        Recommended: 0.2-0.3 for hybrid approach
+    """
     # get raw images
     images = imaging_analysis_lib_mod.get_raws_camera(h5file,cam)
 
@@ -146,8 +173,23 @@ def analyze_SVD_h5file(h5file,cam,reduce_image_func,invU,invS,Vh,all_probes_full
     if images is None:
         return
     
-    # get the names of the atoms images
+    # get the names of the atoms images and probe image
     atoms_names = cam['atoms_images'].copy()
+    probe_name = cam['probe_image']
+
+    # get actual probe image if available and alpha > 0
+    actual_probe = None
+    if alpha > 0 and probe_name in images.keys():
+        actual_probe = np.array(images[probe_name])
+        # Check if current probe shape matches training shape
+        if actual_probe.shape != training_shape:
+            print(f"Warning: Current probe shape {actual_probe.shape} != training shape {training_shape}")
+            print("Cannot use hybrid mode with mismatched shapes. Using pure SVD (alpha=0).")
+            alpha = 0
+            actual_probe = None
+        else:
+            # normalize by total intensity (same as in training)
+            actual_probe = actual_probe / np.sum(actual_probe)
 
     # for each atoms image, reconstruct the probe and save it
     OD = {}
@@ -158,9 +200,41 @@ def analyze_SVD_h5file(h5file,cam,reduce_image_func,invU,invS,Vh,all_probes_full
             continue
 
         try:
-            img = images[atoms_name]
+            img = np.array(images[atoms_name])
+            
+            # Check if current image shape matches training shape
+            if img.shape != training_shape:
+                print(f"Warning: Image {atoms_name} shape {img.shape} != training shape {training_shape}")
+                print(f"Skipping {atoms_name} - cannot apply SVD with mismatched image sizes.")
+                continue
+            
+            # Extract same corner regions as used in training
             img_cut = reduce_image_func(img)
-            probe = reconstruct_probe(img_cut,invU,invS,Vh,all_probes_full, np.shape(img))
+            
+            # SVD reconstruction
+            proj = np.dot(img_cut.flatten(),np.transpose(Vh))
+            probe_svd = np.reshape(np.dot(np.transpose(proj), np.dot(invS,np.dot(invU,all_probes_full))), training_shape)
+            
+            # Blend with actual probe if alpha > 0
+            if actual_probe is not None and alpha > 0:
+                probe = (1 - alpha) * probe_svd + alpha * actual_probe
+            else:
+                probe = probe_svd
+            
+            # Debug: Compare SVD probe with actual probe
+            if probe_name in images.keys():
+                actual_probe_full = np.array(images[probe_name])
+                # Normalize both for comparison
+                probe_norm = probe / np.sum(probe)
+                actual_norm = actual_probe_full / np.sum(actual_probe_full)
+                diff = np.abs(probe_norm - actual_norm)
+                diff_percent = np.mean(diff) / np.mean(actual_norm) * 100
+                max_diff_percent = np.max(diff) / np.mean(actual_norm) * 100
+                print(f"  {atoms_name}: SVD probe differs from actual by {diff_percent:.2f}% avg, {max_diff_percent:.2f}% max")
+            
+            # Note: probe is normalized (sum ~= 1/N_training_images), but calculate_OD 
+            # will renormalize it to match atoms intensity using background region, so this is fine
+            
             general_lib_mod.save_data(h5file, 'results/raw/' + cam['name'] + '/' + atoms_name + '_SVDprobe' , probe)
         except Exception as e:
             print("Error in processing image " + atoms_name, '(' + str(e) + ')')

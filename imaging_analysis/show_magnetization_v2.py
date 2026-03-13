@@ -10,8 +10,8 @@ import lmfit as lm
 # =============================================================================
 # CONSTANTS
 # =============================================================================
-AC_REGION_START = 820
-AC_REGION_END = 1180
+AC_REGION_START = 940
+AC_REGION_END = 1140
 
 # Pre-autocorrelation filter sigma
 G2_PRE_FILTER_SIGMA = 2.0
@@ -663,7 +663,7 @@ def find_peaks_above_threshold(x, y, threshold):
     return np.array(peak_x), np.array(peaks)
 
 
-def plot_z1d_derivative(Z, z1d, y_roi, title, derivative_threshold=0.1):
+def plot_z1d_derivative(Z, z1d, y_roi, title, derivative_threshold=0.09):
     """
     Plots z1d and its derivative in a separate window.
     Marks peaks in the absolute derivative above a threshold (signature of zero crossings).
@@ -680,16 +680,19 @@ def plot_z1d_derivative(Z, z1d, y_roi, title, derivative_threshold=0.1):
     #ax[0].xlim(AC_REGION_START - 10, AC_REGION_END + 10)
     
     # Plot z1d
+    z1d_avg = np.mean(z1d[AC_REGION_START:AC_REGION_END])
+    z1d_std = np.std(z1d[AC_REGION_START:AC_REGION_END])
     # Smooth z1d to remove high-frequency noise
     z1d_smooth = gaussian_filter1d(z1d, sigma=1.)
     ax[1].plot(z1d, 'b-', label='z1d')
     ax[1].plot(z1d_smooth, 'r--', label='z1d_smooth')
     ax[1].set_title('z1d Signal')
-    ax[1].legend()
     ax[1].grid(True, alpha=0.3)
+    ax[1].axhline(z1d_avg, color='r', linestyle='--', linewidth=1.5, alpha=0.5, label=f'Mean: {z1d_avg:.3f} and Std: {z1d_std:.3f}')
     # Mark ROI
-    ax[1].axvline(AC_REGION_START, color='g', linestyle=':', label='ROI Start')
-    ax[1].axvline(AC_REGION_END, color='g', linestyle=':', label='ROI End')
+    ax[1].axvline(AC_REGION_START, color='g', linestyle=':')
+    ax[1].axvline(AC_REGION_END, color='g', linestyle=':')
+
     #ax[1].xlim(AC_REGION_START - 10, AC_REGION_END + 10)
     
     # Calculate derivative
@@ -746,7 +749,13 @@ def plot_z1d_derivative(Z, z1d, y_roi, title, derivative_threshold=0.1):
     ax[2].axvline(AC_REGION_END, color='g', linestyle=':', label='ROI End')
     ax[2].set_ylim(-0.05, 0.15)
     ax[2].set_xlim(AC_REGION_START - 10, AC_REGION_END + 10)
-    
+
+    z1d_domain_avg = np.mean(domain_states)
+
+    ax[1].plot(np.arange(AC_REGION_START, AC_REGION_END), domain_states, 'k-', alpha=0.5, label='Domain State')
+    ax[1].axhline(np.mean(domain_states), color='k', linestyle='--', alpha=0.5, label=f'Domain Avg: {np.mean(domain_states):.2f}')
+    ax[1].legend()
+
     # Color domains on derivative plot based on magnetization sign
     y_min, y_max = ax[2].get_ylim()
     ax[2].fill_between(roi_x, y_min, y_max, where=(domain_states == 1),
@@ -762,7 +771,7 @@ def plot_z1d_derivative(Z, z1d, y_roi, title, derivative_threshold=0.1):
         print(f"  Peak positions (indices): {peak_indices}")
         print(f"  Peak values: {peak_values}")
     
-    return fig, len(peak_indices), peak_indices
+    return fig, len(peak_indices), peak_indices, z1d_avg, z1d_std, z1d_domain_avg
     
 
 
@@ -813,7 +822,8 @@ def show_magnetization_v2(h5file, show=True):
         print("DEBUG: Calculating g2...")
         g2_tuple = calculate_g2(Z, images_ODlog)
         if g2_tuple[0] is None:
-             return None
+            print("DEBUG: g2 calculation returned None, skipping advanced analysis but saving basic results.")
+
              
         z1d, fluctuations, g2, y_roi, domain_info, sweep_data, fit_res, exp_fit_res, smooth_sweep_data = g2_tuple
         
@@ -821,15 +831,19 @@ def show_magnetization_v2(h5file, show=True):
         plot_magnetization(images_ODlog, img_m1, img_m2, Z, D, y_roi, title, show=show)
         print("DEBUG: Main plot finished.")
 
-        if g2 is not None:
+        #if g2 is not None:
+        if True:
             print("DEBUG: Plotting Domain and Correlation analysis...")
             plot_g2_analysis(Z, g2, z1d, fluctuations, fit_res, exp_fit_res, y_roi, domain_info, sweep_data, title)
             plot_smoothing_analysis(g2, fit_res, exp_fit_res, smooth_sweep_data, title, G2_PRE_FILTER_SIGMA)
             # Plot z1d derivative in separate window
-            fig_deriv, nb_zero_crossings, zero_crossing_indices = plot_z1d_derivative(Z, z1d, y_roi, title)
-            
+            fig_deriv, nb_zero_crossings, zero_crossing_indices, z1d_avg, z1d_std, z1d_domain_avg = plot_z1d_derivative(Z, z1d, y_roi, title)
+
             # Store zero crossing count in results
             infos_analysis['nb_zero_crossings'] = int(nb_zero_crossings)
+            infos_analysis['z1d_avg'] = float(z1d_avg)
+            infos_analysis['z1d_std'] = float(z1d_std)
+            infos_analysis['z1d_domain_avg'] = float(z1d_domain_avg)
 
             print("DEBUG: plotting finished.")
             
@@ -843,6 +857,7 @@ def show_magnetization_v2(h5file, show=True):
             infos_analysis['nb_domains_opt_pos'] = int(p_counts[opt_idx])
             infos_analysis['nb_domains_opt_neg'] = int(n_counts[opt_idx])
             infos_analysis['nb_domains_opt_tot'] = int(nb_zero_crossings)
+
             
             # Zero crossing of g2
             lags = np.arange(len(g2))
@@ -853,6 +868,7 @@ def show_magnetization_v2(h5file, show=True):
             # Correlation length from Gaussian decay fit
             if exp_fit_res and 'sigma' in exp_fit_res.params:
                 infos_analysis['g2_correlation_length'] = float(exp_fit_res.params['sigma'].value)
+
         else:
             print("DEBUG: g2 calculation returned None.")
         
