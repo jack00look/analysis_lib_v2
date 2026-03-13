@@ -1,9 +1,9 @@
 import numpy as np
 
 # Set this to pick what to run in waterfall_FLAT_v4.py
-ACTIVE_MODE = 'bubbles_repeat'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
+ACTIVE_MODE = 'ARP_Forward'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
 # Optional override for sequence indices used by ACTIVE_MODE (set to None to use mode default)
-SEQS = [41]
+SEQS = [5,6]
 
 # -------------------------
 # Shared numeric parameters
@@ -13,13 +13,13 @@ PARAMS = {
     'SIGMA_Z_LOCAL_FLUCT': 2,
     'AUTOCORR_CENTER': 1085,
     'AUTOCORR_WINDOW': 20,
-    'X_MIN_INTEGRATION': 890,
-    'X_MAX_INTEGRATION': 1150,
-    'NUM_SECTIONS': 250,
+    'X_MIN_INTEGRATION': 874,
+    'X_MAX_INTEGRATION': 1169,
+    'NUM_SECTIONS': 100,
     'BACK_CHECK_THRESHOLD': 0.05,
     'NTOT_CHECK_THRESHOLD': 7e5,
     # Set to None for autoscale
-    'WATERFALL_MAG_CLIM': (-1., 1.),
+    'WATERFALL_MAG_CLIM': (-.3, .3),
     'WATERFALL_DENSITY_CLIM': None,
 }
 
