@@ -10,8 +10,8 @@ import lmfit as lm
 # =============================================================================
 # CONSTANTS
 # =============================================================================
-AC_REGION_START = 940
-AC_REGION_END = 1140
+AC_REGION_START = 910
+AC_REGION_END = 1170
 
 # Pre-autocorrelation filter sigma
 G2_PRE_FILTER_SIGMA = 2.0
@@ -21,6 +21,17 @@ Y_ROI_HALF_WIDTH = 30
 Z1D_SMOOTH_SIGMA = 10
 DOMAIN_THRESHOLD = 0.04
 ROI_LINE_WIDTH = 2.0
+
+# Signed-derivative peak detection thresholds (waterfall-style)
+DERIVATIVE_THRESHOLD_POS = 0.09
+DERIVATIVE_THRESHOLD_NEG = -0.09
+THRESHOLD_SCAN_POS_MIN = 0.04
+THRESHOLD_SCAN_POS_MAX = 0.1
+THRESHOLD_SCAN_NEG_MIN = -0.10
+THRESHOLD_SCAN_NEG_MAX = -0.04
+THRESHOLD_SCAN_POINTS = 50
+PLATEAU_DELTA_DEFECTS = 0.05
+PLATEAU_MIN_POINTS = 3
 # =============================================================================
 # LIBRARY IMPORTS
 # =============================================================================
@@ -663,10 +674,88 @@ def find_peaks_above_threshold(x, y, threshold):
     return np.array(peak_x), np.array(peaks)
 
 
-def plot_z1d_derivative(Z, z1d, y_roi, title, derivative_threshold=0.09):
+def _count_peak_indices_pos(d_signal, threshold):
+    if d_signal.size < 3:
+        return np.array([], dtype=int)
+    local_max = (d_signal[1:-1] >= d_signal[:-2]) & (d_signal[1:-1] > d_signal[2:])
+    above = d_signal[1:-1] >= threshold
+    return np.where(local_max & above)[0] + 1
+
+
+def _count_peak_indices_neg(d_signal, threshold):
+    if d_signal.size < 3:
+        return np.array([], dtype=int)
+    local_min = (d_signal[1:-1] <= d_signal[:-2]) & (d_signal[1:-1] < d_signal[2:])
+    below = d_signal[1:-1] <= threshold
+    return np.where(local_min & below)[0] + 1
+
+
+def _suggest_threshold_from_plateau(thr_values, avg_curve, current_thr, delta_tol, min_points):
+    """Choose threshold from widest plateau in count vs threshold curve."""
+    if len(thr_values) == 0 or len(avg_curve) == 0:
+        return float(current_thr), None, 'fallback-empty'
+    if len(thr_values) == 1:
+        v = float(thr_values[0])
+        return v, (v, v), 'single-point'
+
+    min_points = max(2, int(min_points))
+    delta_tol = max(0.0, float(delta_tol))
+
+    diffs = np.abs(np.diff(avg_curve))
+    flat_edges = diffs <= delta_tol
+
+    candidates = []
+    i = 0
+    while i < len(flat_edges):
+        if not flat_edges[i]:
+            i += 1
+            continue
+        j = i
+        while (j + 1) < len(flat_edges) and flat_edges[j + 1]:
+            j += 1
+        start_idx = i
+        end_idx = j + 1
+        width_pts = end_idx - start_idx + 1
+        if width_pts >= min_points:
+            mid_idx = (start_idx + end_idx) // 2
+            dist_to_current = abs(float(thr_values[mid_idx]) - float(current_thr))
+            candidates.append((width_pts, -dist_to_current, start_idx, end_idx, mid_idx))
+        i = j + 1
+
+    if len(candidates) > 0:
+        candidates.sort(key=lambda c: (c[0], c[1]), reverse=True)
+        _, _, start_idx, end_idx, mid_idx = candidates[0]
+        return (
+            float(thr_values[mid_idx]),
+            (float(thr_values[start_idx]), float(thr_values[end_idx])),
+            'plateau',
+        )
+
+    min_diff_idx = int(np.argmin(diffs))
+    mid_idx = min_diff_idx + 1
+    start_idx = min_diff_idx
+    end_idx = min_diff_idx + 1
+    return (
+        float(thr_values[mid_idx]),
+        (float(thr_values[start_idx]), float(thr_values[end_idx])),
+        'fallback-min-diff',
+    )
+
+
+def plot_z1d_derivative(
+    Z,
+    z1d,
+    y_roi,
+    title,
+    derivative_threshold_pos=DERIVATIVE_THRESHOLD_POS,
+    derivative_threshold_neg=DERIVATIVE_THRESHOLD_NEG,
+    optimize_thresholds=True,
+):
     """
     Plots z1d and its derivative in a separate window.
-    Marks peaks in the absolute derivative above a threshold (signature of zero crossings).
+    Marks signed derivative peaks using the same logic as waterfall:
+    - positive peaks: local maxima above `derivative_threshold_pos`
+    - negative peaks: local minima below `derivative_threshold_neg`
     """
     fig, ax = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
     # Plot 2D Magnetization (ROI)
@@ -698,15 +787,54 @@ def plot_z1d_derivative(Z, z1d, y_roi, title, derivative_threshold=0.09):
     # Calculate derivative
     dz = np.gradient(z1d)
     dz_smooth = np.gradient(z1d_smooth)
-    abs_dz_smooth = np.abs(dz_smooth)
-    
-    # Find peaks in the absolute derivative above threshold
-    x_indices = np.arange(len(abs_dz_smooth))
-    peak_indices, peak_values = find_peaks_above_threshold(
-        x_indices[AC_REGION_START:AC_REGION_END],
-        abs_dz_smooth[AC_REGION_START:AC_REGION_END],
-        derivative_threshold
-    )
+
+    # Signed peak detection (waterfall-style) in ROI
+    d_roi = dz_smooth[AC_REGION_START:AC_REGION_END]
+    thr_pos_used = float(derivative_threshold_pos)
+    thr_neg_used = float(derivative_threshold_neg)
+    plateau_pos = None
+    plateau_neg = None
+    mode_pos = 'fixed'
+    mode_neg = 'fixed'
+
+    if optimize_thresholds and len(d_roi) >= 3:
+        thr_vals_pos = np.linspace(THRESHOLD_SCAN_POS_MIN, THRESHOLD_SCAN_POS_MAX, max(2, int(THRESHOLD_SCAN_POINTS)))
+        thr_vals_neg = np.linspace(THRESHOLD_SCAN_NEG_MIN, THRESHOLD_SCAN_NEG_MAX, max(2, int(THRESHOLD_SCAN_POINTS)))
+
+        counts_pos = np.asarray([len(_count_peak_indices_pos(d_roi, thr)) for thr in thr_vals_pos], dtype=float)
+        counts_neg = np.asarray([len(_count_peak_indices_neg(d_roi, thr)) for thr in thr_vals_neg], dtype=float)
+
+        thr_pos_used, plateau_pos, mode_pos = _suggest_threshold_from_plateau(
+            thr_vals_pos,
+            counts_pos,
+            derivative_threshold_pos,
+            PLATEAU_DELTA_DEFECTS,
+            PLATEAU_MIN_POINTS,
+        )
+        thr_neg_used, plateau_neg, mode_neg = _suggest_threshold_from_plateau(
+            thr_vals_neg,
+            counts_neg,
+            derivative_threshold_neg,
+            PLATEAU_DELTA_DEFECTS,
+            PLATEAU_MIN_POINTS,
+        )
+
+    if len(d_roi) >= 3:
+        local_max = (d_roi[1:-1] >= d_roi[:-2]) & (d_roi[1:-1] > d_roi[2:])
+        above = d_roi[1:-1] >= thr_pos_used
+        peak_pos_roi = np.where(local_max & above)[0] + 1
+
+        local_min = (d_roi[1:-1] <= d_roi[:-2]) & (d_roi[1:-1] < d_roi[2:])
+        below = d_roi[1:-1] <= thr_neg_used
+        peak_neg_roi = np.where(local_min & below)[0] + 1
+    else:
+        peak_pos_roi = np.array([], dtype=int)
+        peak_neg_roi = np.array([], dtype=int)
+
+    peak_pos_indices = peak_pos_roi + AC_REGION_START
+    peak_neg_indices = peak_neg_roi + AC_REGION_START
+    peak_indices = np.sort(np.concatenate([peak_pos_indices, peak_neg_indices]).astype(int))
+    peak_values = dz_smooth[peak_indices] if len(peak_indices) > 0 else np.array([])
     
     # Build domain states between peaks based on average magnetization
     roi_x = np.arange(AC_REGION_START, AC_REGION_END)
@@ -727,27 +855,51 @@ def plot_z1d_derivative(Z, z1d, y_roi, title, derivative_threshold=0.09):
         domain_states[:] = 1 if avg_z > 0 else -1
     
     # Plot derivative
-    ax[2].plot(dz, 'b-', label='d(z1d)/dx')
-    ax[2].plot(abs_dz_smooth, 'r--', label='d(z1d_smooth)/dx (abs)')
+    ax[2].plot(dz, 'b-', alpha=0.5, label='d(z1d)/dx')
+    ax[2].plot(dz_smooth, 'k-', linewidth=1.2, label='d(z1d_smooth)/dx')
+
+    # Mark threshold lines
+    ax[2].axhline(thr_pos_used, color='tab:blue', linestyle='--', linewidth=1.5,
+                  label=f'+ threshold: {thr_pos_used:.4f}')
+    ax[2].axhline(thr_neg_used, color='tab:red', linestyle='--', linewidth=1.5,
+                  label=f'- threshold: {thr_neg_used:.4f}')
+
+    # Mark signed peaks
+    if len(peak_pos_indices) > 0:
+        ax[2].scatter(
+            peak_pos_indices,
+            dz_smooth[peak_pos_indices],
+            color='tab:blue',
+            s=80,
+            marker='x',
+            linewidths=2,
+            label=f'Positive peaks (n={len(peak_pos_indices)})',
+            zorder=5,
+        )
+    if len(peak_neg_indices) > 0:
+        ax[2].scatter(
+            peak_neg_indices,
+            dz_smooth[peak_neg_indices],
+            color='tab:red',
+            s=80,
+            marker='x',
+            linewidths=2,
+            label=f'Negative peaks (n={len(peak_neg_indices)})',
+            zorder=5,
+        )
+
+    for idx in peak_indices:
+        ax[2].axvline(idx, color='0.4', linestyle=':', alpha=0.3, linewidth=0.8)
     
-    # Mark the threshold line
-    ax[2].axhline(derivative_threshold, color='orange', linestyle='--', linewidth=1.5, 
-                  label=f'Threshold: {derivative_threshold}')
-    
-    # Mark peaks above threshold
-    if len(peak_indices) > 0:
-        ax[2].scatter(peak_indices, peak_values, color='red', s=100, marker='x', 
-                     linewidths=2, label=f'Peaks (n={len(peak_indices)})', zorder=5)
-        # Draw vertical lines for each peak
-        for idx in peak_indices:
-            ax[2].axvline(idx, color='red', linestyle=':', alpha=0.3, linewidth=0.8)
-    
-    ax[2].set_title(f'Derivative of z1d - {len(peak_indices)} Zero Crossings Detected')
+    ax[2].set_title(
+        f'Derivative of z1d - {len(peak_indices)} Peaks Detected '
+        f'(+{len(peak_pos_indices)}, -{len(peak_neg_indices)})'
+    )
     ax[2].legend()
     ax[2].grid(True, alpha=0.3)
     ax[2].axvline(AC_REGION_START, color='g', linestyle=':', label='ROI Start')
     ax[2].axvline(AC_REGION_END, color='g', linestyle=':', label='ROI End')
-    ax[2].set_ylim(-0.05, 0.15)
+    ax[2].set_ylim(-0.15, 0.15)
     ax[2].set_xlim(AC_REGION_START - 10, AC_REGION_END + 10)
 
     z1d_domain_avg = np.mean(domain_states)
@@ -765,8 +917,16 @@ def plot_z1d_derivative(Z, z1d, y_roi, title, derivative_threshold=0.09):
 
     
     # Print statistics
-    print(f"DEBUG: Zero Crossing Analysis")
-    print(f"  Total peaks found above threshold ({derivative_threshold}): {len(peak_indices)}")
+    print("DEBUG: Signed Derivative Peak Analysis")
+    print(
+        f"  Threshold optimization: {'on' if optimize_thresholds else 'off'} | "
+        f"+thr={thr_pos_used:.4f} ({mode_pos}) -thr={thr_neg_used:.4f} ({mode_neg})"
+    )
+    print(
+        f"  Total peaks found: {len(peak_indices)} "
+        f"(+{len(peak_pos_indices)} above {thr_pos_used:.4f}, "
+        f"-{len(peak_neg_indices)} below {thr_neg_used:.4f})"
+    )
     if len(peak_indices) > 0:
         print(f"  Peak positions (indices): {peak_indices}")
         print(f"  Peak values: {peak_values}")
@@ -834,7 +994,11 @@ def show_magnetization_v2(h5file, show=True):
         #if g2 is not None:
         if True:
             print("DEBUG: Plotting Domain and Correlation analysis...")
-            plot_g2_analysis(Z, g2, z1d, fluctuations, fit_res, exp_fit_res, y_roi, domain_info, sweep_data, title)
+            # Removed per user request:
+            #   - Z 1D Profile (ROI only)
+            #   - 2D Magnetization (ROI)
+            #   - Local Z Fluctuations
+            #   - Domain Number vs. Threshold
             plot_smoothing_analysis(g2, fit_res, exp_fit_res, smooth_sweep_data, title, G2_PRE_FILTER_SIGMA)
             # Plot z1d derivative in separate window
             fig_deriv, nb_zero_crossings, zero_crossing_indices, z1d_avg, z1d_std, z1d_domain_avg = plot_z1d_derivative(Z, z1d, y_roi, title)

@@ -335,7 +335,7 @@ def load_profile_from_txt(txt_path):
             print(f"Error: File not found: {txt_path}")
             return None, None
         
-        data = np.loadtxt(txt_path, comments='#')
+        data = np.loadtxt(txt_path, comments='#', skiprows=1)
         
         if data.ndim != 2 or data.shape[1] != 2:
             print(f"Error: Expected 2 columns in {txt_path}, got shape {data.shape}")

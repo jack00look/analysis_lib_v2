@@ -53,10 +53,10 @@ spec.loader.exec_module(settings_mod)
 # Previous shot specification (starting DMD profile source)
 YEAR = 2026
 MONTH = 3
-DAY = 12
+DAY = 20
 SEQUENCE = 2               # Sequence number (integer)
 ITERATION = 0                # Iteration number
-REPETITION = 23             # Repetition number
+REPETITION = 35            # Repetition number
 
 # Error profiles (in DMD feedback folder)
 # Each item must define:
@@ -67,20 +67,68 @@ REPETITION = 23             # Repetition number
 ERROR_PROFILES = [
     {
         'filename': 'sigmoid_center_interpolation1.txt',
-        'kp': 0.8,
+        'kp': 0.5,
+        'smoothing_sigma': 2.0,  # Optional override for default smoothing sigma
     },
-        {
+    {
         'filename': 'sigmoid_center_interpolation2.txt',
         'kp': 0.5,
+        'smoothing_sigma': 2.0,  # Optional override for default smoothing sigma
     },
-        {
+    {
         'filename': 'sigmoid_center_interpolation3.txt',
         'kp': 0.5,
+        'smoothing_sigma': 2.0,  # Optional override for default smoothing sigma
+    },
+    {
+        'filename': 'sigmoid_center_interpolation4.txt',
+        'kp': 0.5,
+        'smoothing_sigma': 2.0,  # Optional override for default smoothing sigma
+    },
+    {
+        'filename': 'sigmoid_center_interpolation5.txt',
+        'kp': 0.9,
+        'smoothing_sigma': 5.,  # Optional override for default smoothing sigma
+    },
+    {
+        'filename': 'sigmoid_center_interpolation6.txt',
+        'kp': 0.5,
+        'smoothing_sigma': 5.,  # Optional override for default smoothing sigma
+    },
+    {
+        'filename': 'sigmoid_center_interpolation7.txt',
+        'kp': 0.8,
+        'smoothing_sigma': 5.,  # Optional override for default smoothing sigma
+    },
+    {
+        'filename': 'sigmoid_center_interpolation8.txt',
+        'kp': 0.8,
+        'smoothing_sigma': 5.,  # Optional override for default smoothing sigma
+    },
+    {
+        'filename': 'sigmoid_center_interpolation9.txt',
+        'kp': 0.8,
+        'smoothing_sigma': 5.,  # Optional override for default smoothing sigma
+    },
+    {
+        'filename': 'sigmoid_center_interpolation10.txt',
+        'kp': 0.5,
+        'smoothing_sigma': 5.,  # Optional override for default smoothing sigma
+    },
+    {
+        'filename': 'sigmoid_center_interpolation11.txt',
+        'kp': 0.8,
+        'smoothing_sigma': 5.,  # Optional override for default smoothing sigma
+    },
+    {
+        'filename': 'sigmoid_center_interpolation12.txt',
+        'kp': 0.5,
+        'smoothing_sigma': 5.,  # Optional override for default smoothing sigma
     },
 ]
 
 # Default Gaussian blur sigma for error profiles (in pixels)
-SMOOTHING_SIGMA = 1.0
+SMOOTHING_SIGMA = 2.0
 
 # DMD server connection
 DMD_SERVER_IP = feedback_config.DMD_SERVER_IP
@@ -190,7 +238,7 @@ def load_error_profile_from_txt(txt_path):
             return None, None
         
         x_um = data[:, 0]
-        x_um = x_um*1.019
+
         error_values = data[:, 1]
 
         error_values = (error_values - np.mean(error_values))  # Center error around zero

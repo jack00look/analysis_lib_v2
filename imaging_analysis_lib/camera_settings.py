@@ -31,15 +31,15 @@ cameras = {
         'alpha': 2.5,
         'chi_sat': 215e6,
         'pulse_time': 5e-6,
-        'roi_back': np.s_[100:200,100:400],
-        'roi_integration': np.s_[25:,:],
+        'roi_back': np.s_[100:200,300:500],
+        'roi_integration': np.s_[66:73,:],
         'atoms_images': ['PHC_m2', 'PHC_m1_1', 'PHC_m1_2' ,'PHC_0','PHC_p1'],
         'probe_image': 'PHC_probe',
         'background_image': 'PHC_back',
 
         'dynamic_range': 1000, #60000, #2**16, 
         'roi': np.s_[:, :],
-        'axis_matrix': np.array([[0, 1], [1, 0],[0, 0]])
+        'axis_matrix': np.array([[1, 0], [0, 1],[0, 0]])
         },
 
     # 'cam_vert2_PHC': {

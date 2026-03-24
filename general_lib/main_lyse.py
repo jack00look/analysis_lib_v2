@@ -25,12 +25,20 @@ def get_day_data(today = True, year = None, month = None, day = None, path =bec_
     day = str(day).zfill(2)
     year = str(year)
     path = path + '/' + year + '/' + month + '/' + day
+    print(f"Loading HDF files from: {path}")
+    
     names = os.listdir(path)
+    hdf_files = [n for n in names if n[-3:] == 'hdf']
+    print(f"Found {len(hdf_files)} HDF files: {sorted(hdf_files)}")
+    
     df_s = []
-    for name in names:
-        if name[-3:] == 'hdf':
-            df = pd.read_hdf(path + '/' + name)
-            df_s.append(df)
+    for name in hdf_files:
+        print(f'Loading: {name}')
+        df = pd.read_hdf(path + '/' + name)
+        print(f"  -> {len(df)} rows")
+        df_s.append(df)
+    
+    print(f"Loaded {len(df_s)} HDF files total")
     current_time = datetime.datetime.now()
     year_now = str(current_time.year).zfill(4)
     month_now = str(current_time.month).zfill(2)

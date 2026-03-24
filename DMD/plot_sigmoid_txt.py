@@ -7,24 +7,110 @@ import matplotlib.pyplot as plt
 # -----------------------------------------------------------------------------
 PLOT_FILES = [
     {
+        'filename': 'sigmoid_center_interpolation1.txt',
+        'line_style': '-',
+        'line_color': 'k',
+        'scatter_color': '0.15',
+        'label': 'Initial Sigmoid Profile',
+    },
+    {
+        'filename': 'sigmoid_center_interpolation2.txt',
+        'line_style': '-',
+        'line_color': 'k',
+        'scatter_color': '0.15',
+        'label': '1st Iteration',
+    },
+    {
         'filename': 'sigmoid_center_interpolation3.txt',
-        'line_style': 'm-',
-        'scatter_color': 'k',
-        'label': 'Sigmoid interpolation 1',
-        'points_label': 'Points from txt',
+        'line_style': '-',
+        'line_color': 'k',
+        'scatter_color': '0.15',
+        'label': '2nd Iteration',
+    },
+    {
+        'filename': 'sigmoid_center_interpolation4.txt',
+        'line_style': '-',
+        'line_color': 'k',
+        'scatter_color': '0.15',
+        'label': '3rd Iteration',
+    },
+    {
+        'filename': 'sigmoid_center_interpolation5.txt',
+        'line_style': '-',
+        'line_color': 'k',
+        'scatter_color': '0.15',
+        'label': '4th Iteration',
+    },
+    {
+        'filename': 'sigmoid_center_interpolation6.txt',
+        'line_style': '-',
+        'line_color': 'k',
+        'scatter_color': '0.15',
+        'label': '5th Iteration',
+    },
+    {
+        'filename': 'sigmoid_center_interpolation7.txt',
+        'line_style': '-',
+        'line_color': 'k',
+        'scatter_color': '0.15',
+        'label': '6th Iteration',
+    },
+    {
+        'filename': 'sigmoid_center_interpolation8.txt',
+        'line_style': '-',
+        'line_color': 'k',
+        'scatter_color': '0.15',
+        'label': '7th Iteration',
+    },
+    {
+        'filename': 'sigmoid_center_interpolation9.txt',
+        'line_style': '-',
+        'line_color': 'k',
+        'scatter_color': '0.15',
+        'label': '8th Iteration',
+    },
+    {
+        'filename': 'sigmoid_center_interpolation10.txt',
+        'line_style': '-',
+        'line_color': 'k',
+        'scatter_color': '0.15',
+        'label': '9th Iteration',
+    },
+    {
+        'filename': 'sigmoid_center_interpolation11.txt',
+        'line_style': '-',
+        'line_color': 'k',
+        'scatter_color': '0.15',
+        'label': '10th Iteration',
+    },
+    {
+        'filename': 'sigmoid_center_interpolation12.txt',
+        'line_style': '-',
+        'line_color': 'k',
+        'scatter_color': '0.15',
+        'label': '11th Iteration',
     },
     {
         'filename': '/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/waterfall/sigmoid_center_interpolation.txt',
         'line_style': 'c-',
         'scatter_color': 'b',
-        'label': 'Sigmoid interpolation 2',
-        'points_label': 'Points from txt 2',
+        'label': 'Sigmoid interpolation New',
     },
 ]
 
 # Backward-compatible single-file config fallback.
 TXT_FILENAME = 'sigmoid_center_interpolation.txt'
 TXT_FILENAME_2 = 'sigmoid_center_interpolation2.txt'
+
+
+# Conversion between bias field (mG) and detuning (Hz)
+BIAS_FIELD_OFFSET_MG = 129.8
+MG_TO_HZ = 2.1e3
+MG_TO_UG = 1e3
+
+# Region (in x [um]) used for RMS calculation in the third figure.
+REGION_START_UM = 950
+REGION_END_UM = 1150
 
 
 def load_sigmoid_txt(file_path):
@@ -70,6 +156,7 @@ def get_plot_specs():
         normalized_specs.append({
             'filename': spec['filename'],
             'line_style': spec.get('line_style', '-'),
+            'line_color': spec.get('line_color', None),
             'scatter_color': spec.get('scatter_color', None),
             'label': spec.get('label', f'Sigmoid interpolation {index}'),
             'points_label': spec.get('points_label', f'Points from txt {index}'),
@@ -88,22 +175,48 @@ def main():
     fig, ax = plt.subplots(figsize=(8, 5), tight_layout=True)
 
     loaded_data = []
-    for spec in plot_specs:
+    for i, spec in enumerate(plot_specs):
         txt_path = os.path.join(script_dir, spec['filename'])
         if not os.path.exists(txt_path):
             raise FileNotFoundError(f'Txt file not found: {txt_path}')
 
         x, y = load_sigmoid_txt(txt_path)
+        y = (y - BIAS_FIELD_OFFSET_MG) * MG_TO_HZ
         loaded_data.append({'x': x, 'y': y, 'spec': spec})
-        ax.plot(x, y, spec['line_style'], linewidth=2, label=spec['label'])
-        scatter_kwargs = {'s': 12, 'alpha': 0.35, 'label': spec['points_label']}
-        if spec['scatter_color'] is not None:
-            scatter_kwargs['c'] = spec['scatter_color']
+
+        color = f'C{i % 10}'
+
+        plot_kwargs = {
+            'linestyle': '-',
+            'linewidth': 2.3,
+            'alpha': 0.95,
+            'label': spec['label'],
+            'color': color,
+        }
+        ax.plot(x, y, **plot_kwargs)
+
+        scatter_kwargs = {'s': 10, 'alpha': 0.25, 'c': color}
         ax.scatter(x, y, **scatter_kwargs)
 
-    ax.set_title('Sigmoid Center Interpolation (from txt)')
-    ax.set_xlabel('x (um)')
-    ax.set_ylabel('sigmoid center')
+    ax.set_title('Magnetization Feedback')
+    ax.set_xlabel('x [um]')
+    ax.set_ylabel('Field Detuning [Hz]')
+
+    # Secondary y-axis: show corresponding bias field in mG.
+    secax = ax.secondary_yaxis(
+        'right',
+        functions=(
+            lambda hz: (hz / MG_TO_HZ) + BIAS_FIELD_OFFSET_MG,
+            lambda mg: (mg - BIAS_FIELD_OFFSET_MG) * MG_TO_HZ,
+        ),
+    )
+    secax.set_ylabel('Bias Field [mG]')
+
+    # Show selected RMS region on the main plot.
+    region_min = min(REGION_START_UM, REGION_END_UM)
+    region_max = max(REGION_START_UM, REGION_END_UM)
+    ax.axvspan(region_min, region_max, color='gray', alpha=0.12, zorder=0)
+
     ax.grid(True, alpha=0.3)
     ax.legend(loc='best')
 
@@ -147,6 +260,54 @@ def main():
         ax2.set_title(f'Difference vs Residual (R²={r_value**2:.4f}, slope={slope:.4f})')
         ax2.grid(True, alpha=0.3)
         ax2.legend()
+
+    # Third figure: RMS in chosen x-region for each sigmoid profile.
+    profile_labels = []
+    profile_rms_hz = []
+    for item in loaded_data:
+        x = item['x']
+        y_hz = item['y']
+        mask = (x >= region_min) & (x <= region_max)
+        if np.count_nonzero(mask) == 0:
+            raise ValueError(
+                f'No data points found in RMS region [{region_min}, {region_max}] um '
+                f'for profile "{item["spec"]["label"]}".'
+            )
+
+        y_region = y_hz[mask]
+        rms_hz = np.sqrt(np.mean((y_region - np.mean(y_region)) ** 2))
+        profile_labels.append(item['spec']['label'])
+        profile_rms_hz.append(rms_hz)
+
+    fig3, ax3 = plt.subplots(figsize=(8, 5), tight_layout=True)
+    x_idx = np.arange(len(profile_labels))
+    ax3.scatter(x_idx, profile_rms_hz, s=70, color='tab:green', edgecolors='k', linewidth=0.6)
+
+    # Keep labels inside axes by setting explicit y-limits with headroom.
+    y_min = float(np.min(profile_rms_hz))
+    y_max = float(np.max(profile_rms_hz))
+    y_span = max(y_max - y_min, 1.0)
+    y_bottom = y_min - 0.12 * y_span
+    y_top = y_max + 0.20 * y_span
+    ax3.set_ylim(y_bottom, y_top)
+
+    ax3.set_xticks(x_idx)
+    ax3.set_xticklabels(profile_labels, rotation=20, ha='right')
+    ax3.set_ylabel('RMS around mean in region [Hz]')
+    ax3.set_xlabel('Sigmoid profile')
+    ax3.set_title(f'Profile RMS around mean in x-region [{region_min:.1f}, {region_max:.1f}] um')
+
+    # Secondary y-axis: RMS in uG (mean-subtracted, so no offset term).
+    secax3 = ax3.secondary_yaxis(
+        'right',
+        functions=(
+            lambda hz_rms: (hz_rms / MG_TO_HZ) * MG_TO_UG,
+            lambda ug_rms: (ug_rms / MG_TO_UG) * MG_TO_HZ,
+        ),
+    )
+    secax3.set_ylabel('RMS around mean in region [uG]')
+
+    ax3.grid(True, alpha=0.3)
 
     plt.show()
 

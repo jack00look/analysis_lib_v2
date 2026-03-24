@@ -1,6 +1,12 @@
 import importlib.util
 import traceback
 import lyse
+import sys
+import os
+
+# Add path to general_lib
+sys.path.insert(0, "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/general_lib")
+from main_lyse import get_day_data
 
 
 CFG_PATH = "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/waterfall/waterfall_config.py"
@@ -19,7 +25,36 @@ if __name__ == "__main__":
         cfg = _load_module(CFG_PATH, "waterfall_config")
         lib = _load_module(LIB_PATH, "waterfall_lib")
 
-        df_orig = lyse.data()
+        # Load HDF data using HDF_CONFIG
+        if hasattr(cfg, 'HDF_CONFIG'):
+            hdf_cfg = cfg.HDF_CONFIG
+            print(f"HDF_CONFIG: today={hdf_cfg.get('today', True)}, "
+                  f"year={hdf_cfg.get('year')}, "
+                  f"month={hdf_cfg.get('month')}, "
+                  f"day={hdf_cfg.get('day')}")
+            
+            df_orig = get_day_data(
+                today=hdf_cfg.get('today', True),
+                year=hdf_cfg.get('year'),
+                month=hdf_cfg.get('month'),
+                day=hdf_cfg.get('day')
+            )
+            
+            if df_orig is None:
+                print("ERROR: get_day_data returned None. Falling back to lyse.data()")
+                df_orig = lyse.data()
+            else:
+                print(f"Successfully loaded HDF data with get_day_data: {type(df_orig)}")
+        else:
+            df_orig = lyse.data()
+            print("Using default lyse.data()")
+
+        # Print shots per sequence
+        print("\nShots per sequence in loaded HDF:")
+        seq_counts = df_orig['sequence_index'].value_counts().sort_index()
+        for seq, count in seq_counts.items():
+            print(f"  Sequence {seq}: {count} shots")
+        print(f"  Total: {len(df_orig)} shots\n")
 
         mode_name = cfg.ACTIVE_MODE
         if mode_name not in cfg.MODE_CONFIGS:

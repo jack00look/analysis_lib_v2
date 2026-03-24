@@ -1,21 +1,35 @@
 import numpy as np
 
 # Set this to pick what to run in waterfall_FLAT_v4.py
-ACTIVE_MODE = 'ARP_Forward'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
+ACTIVE_MODE = 'ARP_Backward'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
 # Optional override for sequence indices used by ACTIVE_MODE (set to None to use mode default)
-SEQS = [5,6]
+SEQS = [4,5]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
+
+#47,48,49,50,51,52
+# -------------------------
+# HDF Data Configuration
+# -------------------------
+HDF_CONFIG = {
+    'today': True,  # Set to False to load HDF from a previous day
+    'year': 2026,   # Set if today=False (e.g., 2026)
+    'month': 3,  # Set if today=False (e.g., 3 for March)
+    'day': 11,    # Set if today=False (e.g., 17)
+}
 
 # -------------------------
 # Shared numeric parameters
 # -------------------------
 PARAMS = {
+    # Camera used to convert x axis from pixels to microns using camera_settings.cameras[CAMERA_NAME]['px_size']
+    'CAMERA_NAME': 'cam_vert1',
     'SIGMA_Z_LOCAL_AVG': 3,
     'SIGMA_Z_LOCAL_FLUCT': 2,
     'AUTOCORR_CENTER': 1085,
     'AUTOCORR_WINDOW': 20,
-    'X_MIN_INTEGRATION': 874,
-    'X_MAX_INTEGRATION': 1169,
-    'NUM_SECTIONS': 100,
+    # Integration window limits are in micrometers (um)
+    'X_MIN_INTEGRATION': 905,
+    'X_MAX_INTEGRATION': 1205,
+    'NUM_SECTIONS': 300,
     'BACK_CHECK_THRESHOLD': 0.05,
     'NTOT_CHECK_THRESHOLD': 7e5,
     # Set to None for autoscale
@@ -36,6 +50,7 @@ DEFAULT_PLOTS = {
     'corr_mag_density': True,
     'evolution_plots': False,
 }
+
 
 MODE_CONFIGS = {
     'ARP_Forward': {
@@ -97,7 +112,7 @@ MODE_CONFIGS = {
         'scan': 'ARP_KZ_reps',
         'seqs': [50],
         'data_origin': 'show_ODs',
-        'constraints': {'ARPKZ_final_set_field': 130.43},
+        'constraints': {'ARPKZ_final_set_field': 130.429},
         'average': False,
         'plots': {
             **DEFAULT_PLOTS,
@@ -181,6 +196,59 @@ MODE_CONFIGS = {
             ('ARP_ramp_speed', 'mG/ms'),
             ('ARPB_initial_set_field', 'mG'),
             ('bubbles_time', 'Hz'),
+        ],
+    },
+    'KZ_defect_analysis': {
+        'scan': 'KZ_defect_analysis',
+        'seqs': [],  # Set your sequence indices
+        'data_origin': 'show_ODs',
+        'defect_analysis': {
+            'gaussian_sigma': .3,      # Gaussian smoothing radius (sigma, in pixels)
+            'derivative_threshold': 0.09,  # Backward-compatible base magnitude for thresholds
+            'derivative_threshold_pos': 0.055,  # +dM/dx threshold for positive peaks
+            'derivative_threshold_neg': -0.035,  # -dM/dx threshold for negative peaks
+            'threshold_scan': False,     # Enable threshold scans
+            'threshold_scan_min': 0.06,
+            'threshold_scan_max': 0.1,
+            'threshold_scan_pos_min': 0.06,
+            'threshold_scan_pos_max': 0.10,
+            'threshold_scan_neg_min': -0.10,
+            'threshold_scan_neg_max': -0.05,
+            'threshold_scan_points': 50,
+            'threshold_scan_first_n_sequences': 3,  # Do threshold scan separately for first N repetitions (rep)
+            'single_rep_shot_number': 3,  # In each repetition plot, show only this shot number (1-based)
+            'plateau_delta_defects': 0.05,  # Plateau criterion: |Δ(defects/shot)| <= this between adjacent thresholds
+            'plateau_min_points': 3,  # Minimum number of threshold points for a valid plateau
+            'zero_crossing_min_distance_um': 3.0,  # Accept zero-crossing correction only if >= this distance from threshold peaks
+            # Optional post-threshold false-positive filter:
+            # For each threshold peak, require |mean(m right N px) - mean(m left N px)| >= min_abs_delta_m.
+            # Rejected peaks are marked with black crosses and not counted.
+            'peak_step_filter_enabled': True,
+            'peak_step_filter_window_px': 4,
+            'peak_step_filter_min_abs_delta_m': 0.2,
+            # Merge same-sign threshold peaks closer than this distance (um)
+            # into one defect at their midpoint.
+            'min_same_sign_peak_distance_um': 5.0,
+            # Missed-defect correction method for same-sign derivative runs:
+            # 'zero_crossing' (default), 'opposite_peak', or 'both'
+            'missed_defect_correction_method': 'opposite_peak',
+            'target_avg_peaks': 1.0,    # Optional reference line in plots (not used for plateau-based suggestion)
+        },
+        'constraints': {
+            'ARPKZ_final_set_field': 130.45,  # Set to desired value (e.g., 130.429)
+            'ARPKZ_omega_ramp_time': 4.,  # Set to desired value
+            'ARPKZ_waiting_time': 20.,  # Set to desired value
+        },
+        'average': False,
+        'plots': {
+            **DEFAULT_PLOTS,
+            'sectioned_sigmoid': False,
+            'corr_sigmoid_density': False,
+        },
+        'globals_in_title': [
+            ('ARPKZ_final_set_field', 'mG'),
+            ('ARPKZ_omega_ramp_time', 'ms'),
+            ('ARPKZ_waiting_time', 'ms'),
         ],
     },
 }
