@@ -33,11 +33,13 @@ if __name__ == "__main__":
                   f"month={hdf_cfg.get('month')}, "
                   f"day={hdf_cfg.get('day')}")
             
+            today_flag = hdf_cfg.get('today', True)
             df_orig = get_day_data(
-                today=hdf_cfg.get('today', True),
+                today=today_flag,
                 year=hdf_cfg.get('year'),
                 month=hdf_cfg.get('month'),
-                day=hdf_cfg.get('day')
+                day=hdf_cfg.get('day'),
+                include_lyse_live=today_flag,  # Load live lyse.data() only if today=True
             )
             
             if df_orig is None:
@@ -48,6 +50,19 @@ if __name__ == "__main__":
         else:
             df_orig = lyse.data()
             print("Using default lyse.data()")
+
+        # Final safety dedup in case a source already contains repeated rows.
+        try:
+            n_before = len(df_orig)
+            if 'filepath' in df_orig.columns:
+                df_orig = df_orig.drop_duplicates(subset=['filepath'], keep='last')
+            else:
+                df_orig = df_orig[~df_orig.index.duplicated(keep='last')]
+            n_after = len(df_orig)
+            if n_after != n_before:
+                print(f"Deduplicated loaded data: {n_before} -> {n_after} rows")
+        except Exception as err:
+            print(f"Warning: deduplication step failed ({err})")
 
         # Print shots per sequence
         print("\nShots per sequence in loaded HDF:")

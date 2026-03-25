@@ -3,8 +3,9 @@ import numpy as np
 # Set this to pick what to run in waterfall_FLAT_v4.py
 ACTIVE_MODE = 'ARP_Backward'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
 # Optional override for sequence indices used by ACTIVE_MODE (set to None to use mode default)
-SEQS = [4,5]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
 
+SEQS = [14,15]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
+#SEQS=[33,34,35,36,37,38]
 #47,48,49,50,51,52
 # -------------------------
 # HDF Data Configuration
@@ -13,7 +14,7 @@ HDF_CONFIG = {
     'today': True,  # Set to False to load HDF from a previous day
     'year': 2026,   # Set if today=False (e.g., 2026)
     'month': 3,  # Set if today=False (e.g., 3 for March)
-    'day': 11,    # Set if today=False (e.g., 17)
+    'day': 24,    # Set if today=False (e.g., 17)
 }
 
 # -------------------------
@@ -33,7 +34,7 @@ PARAMS = {
     'BACK_CHECK_THRESHOLD': 0.05,
     'NTOT_CHECK_THRESHOLD': 7e5,
     # Set to None for autoscale
-    'WATERFALL_MAG_CLIM': (-.3, .3),
+    'WATERFALL_MAG_CLIM': (-.2, .4),
     'WATERFALL_DENSITY_CLIM': None,
 }
 
@@ -204,9 +205,9 @@ MODE_CONFIGS = {
         'data_origin': 'show_ODs',
         'defect_analysis': {
             'gaussian_sigma': .3,      # Gaussian smoothing radius (sigma, in pixels)
-            'derivative_threshold': 0.09,  # Backward-compatible base magnitude for thresholds
-            'derivative_threshold_pos': 0.055,  # +dM/dx threshold for positive peaks
-            'derivative_threshold_neg': -0.035,  # -dM/dx threshold for negative peaks
+            'derivative_threshold': 0.0,  # Backward-compatible base magnitude for thresholds
+            'derivative_threshold_pos': 0.02,  # +dM/dx threshold for positive peaks
+            'derivative_threshold_neg': -0.02,  # -dM/dx threshold for negative peaks
             'threshold_scan': False,     # Enable threshold scans
             'threshold_scan_min': 0.06,
             'threshold_scan_max': 0.1,
@@ -225,19 +226,22 @@ MODE_CONFIGS = {
             # Rejected peaks are marked with black crosses and not counted.
             'peak_step_filter_enabled': True,
             'peak_step_filter_window_px': 4,
-            'peak_step_filter_min_abs_delta_m': 0.2,
+            'peak_step_filter_min_abs_delta_m': 0.1,
             # Merge same-sign threshold peaks closer than this distance (um)
             # into one defect at their midpoint.
-            'min_same_sign_peak_distance_um': 5.0,
+            'min_same_sign_peak_distance_um': 7.0,
+            # KZ_defect_analysis position-histogram half-window (counts defects
+            # within ±window around each 1-um center)
+            'defect_position_hist_half_window_um': 4.0,
             # Missed-defect correction method for same-sign derivative runs:
             # 'zero_crossing' (default), 'opposite_peak', or 'both'
             'missed_defect_correction_method': 'opposite_peak',
             'target_avg_peaks': 1.0,    # Optional reference line in plots (not used for plateau-based suggestion)
         },
         'constraints': {
-            'ARPKZ_final_set_field': 130.45,  # Set to desired value (e.g., 130.429)
-            'ARPKZ_omega_ramp_time': 4.,  # Set to desired value
-            'ARPKZ_waiting_time': 20.,  # Set to desired value
+            'ARPKZ_final_set_field': 130.395,  # Set to desired value (e.g., 130.429)
+            'ARPKZ_omega_ramp_time': 32.,  # Set to desired value
+            'ARPKZ_waiting_time': 10.,  # Set to desired value
         },
         'average': False,
         'plots': {

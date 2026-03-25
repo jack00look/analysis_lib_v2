@@ -13,7 +13,7 @@ analysis_lib_v2_folder = "/home/{}/labscript-suite/userlib/analysislib/analysis_
 
 bec_data_path = "/home/{}/NAS542_dataBEC2".format(username)
 
-def get_day_data(today = True, year = None, month = None, day = None, path =bec_data_path,bec = 2):
+def get_day_data(today = True, year = None, month = None, day = None, path =bec_data_path, bec = 2, include_lyse_live = True):
     if today:
         current_time = datetime.datetime.now()
         year = current_time.year
@@ -43,13 +43,29 @@ def get_day_data(today = True, year = None, month = None, day = None, path =bec_
     year_now = str(current_time.year).zfill(4)
     month_now = str(current_time.month).zfill(2)
     day_now = str(current_time.day).zfill(2)
-    if year == year_now and month == month_now and day == day_now:
+    if include_lyse_live and year == year_now and month == month_now and day == day_now:
         df = lyse.data()
         df_s.append(df)
     if len(df_s) == 0:
         print('No data found for this day')
         return
     elif len(df_s) == 1:
-        return df_s[0]
+        out = df_s[0]
     else:
-        return pd.concat(df_s)
+        out = pd.concat(df_s)
+
+    # Remove duplicates when the same shots are present in both day HDF files
+    # and live lyse dataframe.
+    try:
+        n_before = len(out)
+        if hasattr(out, 'columns') and 'filepath' in out.columns:
+            out = out.drop_duplicates(subset=['filepath'], keep='last')
+        else:
+            out = out[~out.index.duplicated(keep='last')]
+        n_after = len(out)
+        if n_after != n_before:
+            print(f"Deduplicated rows: {n_before} -> {n_after}")
+    except Exception as err:
+        print(f"Warning: could not deduplicate rows ({err})")
+
+    return out

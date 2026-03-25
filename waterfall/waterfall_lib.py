@@ -1035,6 +1035,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         peak_step_filter_window_px = 4
         peak_step_filter_min_abs_delta_m = 0.3
         min_same_sign_peak_distance_um = 4.0
+        defect_position_hist_half_window_um = 2.0
         missed_defect_correction_method = 'zero_crossing'
         try:
             defect_cfg = mode_cfg.get('defect_analysis', {}) if isinstance(mode_cfg, dict) else {}
@@ -1060,6 +1061,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             peak_step_filter_window_px = int(defect_cfg.get('peak_step_filter_window_px', peak_step_filter_window_px))
             peak_step_filter_min_abs_delta_m = float(defect_cfg.get('peak_step_filter_min_abs_delta_m', peak_step_filter_min_abs_delta_m))
             min_same_sign_peak_distance_um = float(defect_cfg.get('min_same_sign_peak_distance_um', min_same_sign_peak_distance_um))
+            defect_position_hist_half_window_um = float(defect_cfg.get('defect_position_hist_half_window_um', defect_position_hist_half_window_um))
             missed_defect_correction_method = str(
                 defect_cfg.get('missed_defect_correction_method', missed_defect_correction_method)
             ).strip().lower()
@@ -1068,6 +1070,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         peak_step_filter_window_px = max(1, int(peak_step_filter_window_px))
         peak_step_filter_min_abs_delta_m = max(0.0, float(peak_step_filter_min_abs_delta_m))
         min_same_sign_peak_distance_um = max(0.0, float(min_same_sign_peak_distance_um))
+        defect_position_hist_half_window_um = max(0.0, float(defect_position_hist_half_window_um))
         if missed_defect_correction_method not in ('zero_crossing', 'opposite_peak', 'both'):
             missed_defect_correction_method = 'zero_crossing'
 
@@ -1247,64 +1250,70 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                 'fallback-min-diff',
             )
 
-        if threshold_scan_points < 2:
-            threshold_scan_points = 2
-        if threshold_scan_pos_max < threshold_scan_pos_min:
-            threshold_scan_pos_min, threshold_scan_pos_max = threshold_scan_pos_max, threshold_scan_pos_min
-        if threshold_scan_neg_max < threshold_scan_neg_min:
-            threshold_scan_neg_min, threshold_scan_neg_max = threshold_scan_neg_max, threshold_scan_neg_min
-        thr_vals_pos = np.linspace(threshold_scan_pos_min, threshold_scan_pos_max, threshold_scan_points)
-        thr_vals_neg = np.linspace(threshold_scan_neg_min, threshold_scan_neg_max, threshold_scan_points)
+        # Initialize threshold arrays (used conditionally below)
+        thr_vals_pos = np.array([], dtype=float)
+        thr_vals_neg = np.array([], dtype=float)
+        
+        # Only perform threshold scan if explicitly enabled
+        if threshold_scan:
+            if threshold_scan_points < 2:
+                threshold_scan_points = 2
+            if threshold_scan_pos_max < threshold_scan_pos_min:
+                threshold_scan_pos_min, threshold_scan_pos_max = threshold_scan_pos_max, threshold_scan_pos_min
+            if threshold_scan_neg_max < threshold_scan_neg_min:
+                threshold_scan_neg_min, threshold_scan_neg_max = threshold_scan_neg_max, threshold_scan_neg_min
+            thr_vals_pos = np.linspace(threshold_scan_pos_min, threshold_scan_pos_max, threshold_scan_points)
+            thr_vals_neg = np.linspace(threshold_scan_neg_min, threshold_scan_neg_max, threshold_scan_points)
 
-        # Analyze optimal thresholds for each repetition (rep): one for positive peaks, one for negative peaks.
-        if defect_reps_for_plot is not None and len(defect_reps_for_plot) == len(d_rois):
-            rep_vals_all = np.asarray(defect_reps_for_plot)
-            for rep_val in np.sort(np.unique(rep_vals_all)):
-                idx_rep = np.where(rep_vals_all == rep_val)[0]
-                d_rois_rep = [d_rois[i] for i in idx_rep]
-                if len(d_rois_rep) == 0:
-                    continue
+            # Analyze optimal thresholds for each repetition (rep): one for positive peaks, one for negative peaks.
+            if defect_reps_for_plot is not None and len(defect_reps_for_plot) == len(d_rois):
+                rep_vals_all = np.asarray(defect_reps_for_plot)
+                for rep_val in np.sort(np.unique(rep_vals_all)):
+                    idx_rep = np.where(rep_vals_all == rep_val)[0]
+                    d_rois_rep = [d_rois[i] for i in idx_rep]
+                    if len(d_rois_rep) == 0:
+                        continue
 
-                avg_counts_pos_rep, avg_counts_neg_rep = [], []
-                for thr_pos in thr_vals_pos:
-                    c_pos = [len(_count_peak_indices_pos(d_roi, thr_pos)) for d_roi in d_rois_rep]
-                    avg_counts_pos_rep.append(float(np.mean(c_pos)) if len(c_pos) > 0 else 0.0)
-                for thr_neg in thr_vals_neg:
-                    c_neg = [len(_count_peak_indices_neg(d_roi, thr_neg)) for d_roi in d_rois_rep]
-                    avg_counts_neg_rep.append(float(np.mean(c_neg)) if len(c_neg) > 0 else 0.0)
-                avg_counts_pos_rep = np.asarray(avg_counts_pos_rep, dtype=float)
-                avg_counts_neg_rep = np.asarray(avg_counts_neg_rep, dtype=float)
+                    avg_counts_pos_rep, avg_counts_neg_rep = [], []
+                    for thr_pos in thr_vals_pos:
+                        c_pos = [len(_count_peak_indices_pos(d_roi, thr_pos)) for d_roi in d_rois_rep]
+                        avg_counts_pos_rep.append(float(np.mean(c_pos)) if len(c_pos) > 0 else 0.0)
+                    for thr_neg in thr_vals_neg:
+                        c_neg = [len(_count_peak_indices_neg(d_roi, thr_neg)) for d_roi in d_rois_rep]
+                        avg_counts_neg_rep.append(float(np.mean(c_neg)) if len(c_neg) > 0 else 0.0)
+                    avg_counts_pos_rep = np.asarray(avg_counts_pos_rep, dtype=float)
+                    avg_counts_neg_rep = np.asarray(avg_counts_neg_rep, dtype=float)
 
-                suggested_thr_pos_rep, plateau_bounds_pos_rep, selection_mode_pos_rep = _suggest_threshold_from_plateau(
-                    thr_vals_pos,
-                    avg_counts_pos_rep,
-                    deriv_threshold_pos,
-                    plateau_delta_defects,
-                    plateau_min_points,
-                )
-                suggested_thr_neg_rep, plateau_bounds_neg_rep, selection_mode_neg_rep = _suggest_threshold_from_plateau(
-                    thr_vals_neg,
-                    avg_counts_neg_rep,
-                    deriv_threshold_neg,
-                    plateau_delta_defects,
-                    plateau_min_points,
-                )
+                    suggested_thr_pos_rep, plateau_bounds_pos_rep, selection_mode_pos_rep = _suggest_threshold_from_plateau(
+                        thr_vals_pos,
+                        avg_counts_pos_rep,
+                        deriv_threshold_pos,
+                        plateau_delta_defects,
+                        plateau_min_points,
+                    )
+                    suggested_thr_neg_rep, plateau_bounds_neg_rep, selection_mode_neg_rep = _suggest_threshold_from_plateau(
+                        thr_vals_neg,
+                        avg_counts_neg_rep,
+                        deriv_threshold_neg,
+                        plateau_delta_defects,
+                        plateau_min_points,
+                    )
 
-                rep_opt_threshold_pos_by_rep[rep_val] = float(suggested_thr_pos_rep)
-                rep_opt_threshold_neg_by_rep[rep_val] = float(suggested_thr_neg_rep)
-                rep_opt_plateau_bounds_pos_by_rep[rep_val] = plateau_bounds_pos_rep
-                rep_opt_plateau_bounds_neg_by_rep[rep_val] = plateau_bounds_neg_rep
-                rep_opt_selection_mode_pos_by_rep[rep_val] = selection_mode_pos_rep
-                rep_opt_selection_mode_neg_by_rep[rep_val] = selection_mode_neg_rep
+                    rep_opt_threshold_pos_by_rep[rep_val] = float(suggested_thr_pos_rep)
+                    rep_opt_threshold_neg_by_rep[rep_val] = float(suggested_thr_neg_rep)
+                    rep_opt_plateau_bounds_pos_by_rep[rep_val] = plateau_bounds_pos_rep
+                    rep_opt_plateau_bounds_neg_by_rep[rep_val] = plateau_bounds_neg_rep
+                    rep_opt_selection_mode_pos_by_rep[rep_val] = selection_mode_pos_rep
+                    rep_opt_selection_mode_neg_by_rep[rep_val] = selection_mode_neg_rep
 
-                bi_pos = int(np.argmin(np.abs(thr_vals_pos - suggested_thr_pos_rep)))
-                bi_neg = int(np.argmin(np.abs(thr_vals_neg - suggested_thr_neg_rep)))
-                print(
-                    f"KZ rep {int(rep_val)} optimal thresholds: pos={suggested_thr_pos_rep:.4f} "
-                    f"({selection_mode_pos_rep}, avg+={avg_counts_pos_rep[bi_pos]:.2f}), "
-                    f"neg={suggested_thr_neg_rep:.4f} "
-                    f"({selection_mode_neg_rep}, avg-={avg_counts_neg_rep[bi_neg]:.2f})"
-                )
+                    bi_pos = int(np.argmin(np.abs(thr_vals_pos - suggested_thr_pos_rep)))
+                    bi_neg = int(np.argmin(np.abs(thr_vals_neg - suggested_thr_neg_rep)))
+                    print(
+                        f"KZ rep {int(rep_val)} optimal thresholds: pos={suggested_thr_pos_rep:.4f} "
+                        f"({selection_mode_pos_rep}, avg+={avg_counts_pos_rep[bi_pos]:.2f}), "
+                        f"neg={suggested_thr_neg_rep:.4f} "
+                        f"({selection_mode_neg_rep}, avg-={avg_counts_neg_rep[bi_neg]:.2f})"
+                    )
 
         # Recount defects using optimal positive/negative thresholds per rep.
         per_shot_thresholds = []
@@ -1466,6 +1475,68 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             f"shots={n_shots}, total_defects={total_defects}, corrected_missed={corrected_total}, rejected_peaks={rejected_total}, "
             f"avg_defects_per_shot={avg_defects:.3f} ± {stat_err:.3f} (SEM)"
         )
+
+        # Histogram 1: number of defects per shot.
+        if len(per_shot_counts) > 0:
+            fig_hn, ax_hn = plt.subplots(figsize=(7.0, 4.2), tight_layout=True)
+            c_arr = np.asarray(per_shot_counts, dtype=int)
+            n_bins = max(1, int(np.sqrt(len(c_arr))))
+            bins = n_bins
+            ax_hn.hist(c_arr, bins=bins, color='tab:blue', alpha=0.75, edgecolor='black')
+            ax_hn.set_xlabel('Defects per shot')
+            ax_hn.set_ylabel('Number of shots')
+            ax_hn.set_title(f'KZ_defect_analysis: histogram of defects/shot (seqs: {seqs}, bins=sqrt(N_shots))')
+            ax_hn.grid(True, alpha=0.25)
+
+        # Histogram 2: defect position accumulation over all shots.
+        # 1 um center spacing; each center counts defects within ±2 um.
+        all_defect_x = np.concatenate([
+            np.asarray(defect_x, dtype=float),
+            np.asarray(defect_x_corr, dtype=float),
+        ])
+        all_defect_x = all_defect_x[np.isfinite(all_defect_x)]
+        if all_defect_x.size > 0:
+            x0 = int(np.floor(float(x_min_um)))
+            x1 = int(np.ceil(float(x_max_um)))
+            x_centers = np.arange(x0, x1 + 1, 1, dtype=float)
+            counts_pm2 = np.array([
+                int(np.count_nonzero(np.abs(all_defect_x - xc) <= defect_position_hist_half_window_um)) for xc in x_centers
+            ], dtype=float)
+
+            fig_hx, ax_hx = plt.subplots(figsize=(9.0, 4.5), tight_layout=True)
+            ax_hx.bar(x_centers, counts_pm2, width=0.9, color='tab:orange', alpha=0.75, edgecolor='black')
+            ax_hx.set_xlabel(r'x ($\mu m$)')
+            ax_hx.set_ylabel(rf'Counts in $\pm {defect_position_hist_half_window_um:g}\,\mu m$ window')
+            ax_hx.set_title(f'KZ_defect_analysis: defect-position accumulation (all shots, seqs: {seqs})')
+            ax_hx.grid(True, alpha=0.25)
+
+        # Histogram 3: defect size (distance between paired pos and neg peaks).
+        # For each shot, compute distances between all pos/neg peak pairs within that shot.
+        all_defect_sizes = []
+        for i, yv in enumerate(y_final):
+            if i < len(defect_x_pos) and i < len(defect_x_neg):
+                # Collect all pos and neg x positions for this shot (y value)
+                pos_x_shot = [defect_x_pos[j] for j in range(len(defect_x_pos)) if defect_y_pos[j] == yv] if len(defect_y_pos) > 0 else []
+                neg_x_shot = [defect_x_neg[j] for j in range(len(defect_x_neg)) if defect_y_neg[j] == yv] if len(defect_y_neg) > 0 else []
+                
+                # For each positive peak, find nearest negative peak and record distance
+                if len(pos_x_shot) > 0 and len(neg_x_shot) > 0:
+                    for px in pos_x_shot:
+                        distances = np.abs(np.asarray(neg_x_shot) - float(px))
+                        all_defect_sizes.append(float(np.min(distances)))
+        
+        all_defect_sizes = np.asarray(all_defect_sizes, dtype=float)
+        if all_defect_sizes.size > 0:
+            fig_hs, ax_hs = plt.subplots(figsize=(7.0, 4.2), tight_layout=True)
+            n_bins_size = max(3, int(np.sqrt(len(all_defect_sizes))))
+            ax_hs.hist(all_defect_sizes, bins=n_bins_size, color='tab:green', alpha=0.75, edgecolor='black')
+            ax_hs.set_xlabel(r'Defect size ($\mu m$, distance pos-to-neg)')
+            ax_hs.set_ylabel('Count')
+            mean_size = float(np.mean(all_defect_sizes))
+            std_size = float(np.std(all_defect_sizes))
+            ax_hs.set_title(f'KZ_defect_analysis: defect-size distribution (seqs: {seqs})\nmean={mean_size:.2f} ± {std_size:.2f} µm')
+            ax_hs.grid(True, alpha=0.25)
+            print(f"Defect sizes: mean={mean_size:.3f} µm, std={std_size:.3f} µm, median={float(np.median(all_defect_sizes)):.3f} µm, N={len(all_defect_sizes)}")
 
         if threshold_scan and len(d_rois) > 0:
             # Plot this process in the selected single-repetition analyses.
