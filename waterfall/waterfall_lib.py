@@ -1017,62 +1017,30 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         deriv_threshold = 0.09
         deriv_threshold_pos = 0.09
         deriv_threshold_neg = -0.09
-        threshold_scan = False
-        threshold_scan_min = 0.02
-        threshold_scan_max = 0.20
-        threshold_scan_pos_min = 0.02
-        threshold_scan_pos_max = 0.20
-        threshold_scan_neg_min = -0.20
-        threshold_scan_neg_max = -0.02
-        threshold_scan_points = 50
-        target_avg_peaks = 1.0
-        threshold_scan_first_n_sequences = 3
-        plateau_delta_defects = 0.05
-        plateau_min_points = 3
-        single_rep_shot_number = 3
         zero_crossing_min_distance_um = 5.0
         peak_step_filter_enabled = False
         peak_step_filter_window_px = 4
         peak_step_filter_min_abs_delta_m = 0.3
         min_same_sign_peak_distance_um = 4.0
         defect_position_hist_half_window_um = 2.0
-        missed_defect_correction_method = 'zero_crossing'
         try:
             defect_cfg = mode_cfg.get('defect_analysis', {}) if isinstance(mode_cfg, dict) else {}
             gauss_sigma = float(defect_cfg.get('gaussian_sigma', gauss_sigma))
             deriv_threshold = float(defect_cfg.get('derivative_threshold', deriv_threshold))
             deriv_threshold_pos = float(defect_cfg.get('derivative_threshold_pos', deriv_threshold))
             deriv_threshold_neg = float(defect_cfg.get('derivative_threshold_neg', -abs(deriv_threshold_pos)))
-            threshold_scan = bool(defect_cfg.get('threshold_scan', threshold_scan))
-            threshold_scan_min = float(defect_cfg.get('threshold_scan_min', threshold_scan_min))
-            threshold_scan_max = float(defect_cfg.get('threshold_scan_max', threshold_scan_max))
-            threshold_scan_pos_min = float(defect_cfg.get('threshold_scan_pos_min', threshold_scan_min))
-            threshold_scan_pos_max = float(defect_cfg.get('threshold_scan_pos_max', threshold_scan_max))
-            threshold_scan_neg_min = float(defect_cfg.get('threshold_scan_neg_min', -threshold_scan_pos_max))
-            threshold_scan_neg_max = float(defect_cfg.get('threshold_scan_neg_max', -threshold_scan_pos_min))
-            threshold_scan_points = int(defect_cfg.get('threshold_scan_points', threshold_scan_points))
-            target_avg_peaks = float(defect_cfg.get('target_avg_peaks', target_avg_peaks))
-            threshold_scan_first_n_sequences = int(defect_cfg.get('threshold_scan_first_n_sequences', threshold_scan_first_n_sequences))
-            plateau_delta_defects = float(defect_cfg.get('plateau_delta_defects', plateau_delta_defects))
-            plateau_min_points = int(defect_cfg.get('plateau_min_points', plateau_min_points))
-            single_rep_shot_number = int(defect_cfg.get('single_rep_shot_number', single_rep_shot_number))
             zero_crossing_min_distance_um = float(defect_cfg.get('zero_crossing_min_distance_um', zero_crossing_min_distance_um))
             peak_step_filter_enabled = bool(defect_cfg.get('peak_step_filter_enabled', peak_step_filter_enabled))
             peak_step_filter_window_px = int(defect_cfg.get('peak_step_filter_window_px', peak_step_filter_window_px))
             peak_step_filter_min_abs_delta_m = float(defect_cfg.get('peak_step_filter_min_abs_delta_m', peak_step_filter_min_abs_delta_m))
             min_same_sign_peak_distance_um = float(defect_cfg.get('min_same_sign_peak_distance_um', min_same_sign_peak_distance_um))
             defect_position_hist_half_window_um = float(defect_cfg.get('defect_position_hist_half_window_um', defect_position_hist_half_window_um))
-            missed_defect_correction_method = str(
-                defect_cfg.get('missed_defect_correction_method', missed_defect_correction_method)
-            ).strip().lower()
         except Exception:
             pass
         peak_step_filter_window_px = max(1, int(peak_step_filter_window_px))
         peak_step_filter_min_abs_delta_m = max(0.0, float(peak_step_filter_min_abs_delta_m))
         min_same_sign_peak_distance_um = max(0.0, float(min_same_sign_peak_distance_um))
         defect_position_hist_half_window_um = max(0.0, float(defect_position_hist_half_window_um))
-        if missed_defect_correction_method not in ('zero_crossing', 'opposite_peak', 'both'):
-            missed_defect_correction_method = 'zero_crossing'
 
         x_centers_um = np.arange(M_final.shape[1]) * um_per_px
         x_min_um = float(params['X_MIN_INTEGRATION'])
@@ -1101,30 +1069,6 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             local_min = (d_signal[1:-1] <= d_signal[:-2]) & (d_signal[1:-1] < d_signal[2:])
             below = d_signal[1:-1] <= threshold
             return np.where(local_min & below)[0] + 1
-
-        def _find_zero_crossing_x(m_roi, x_roi_um, i_start, i_end):
-            if m_roi.size < 2:
-                return None
-            i0 = int(max(0, min(i_start, i_end)))
-            i1 = int(min(m_roi.size - 1, max(i_start, i_end)))
-            if i1 <= i0:
-                return None
-
-            # Search sign changes in [i0, i1]
-            for k in range(i0, i1):
-                y0 = float(m_roi[k])
-                y1 = float(m_roi[k + 1])
-                if y0 == 0.0:
-                    return float(x_roi_um[k])
-                if y1 == 0.0:
-                    return float(x_roi_um[k + 1])
-                if y0 * y1 < 0.0:
-                    x0 = float(x_roi_um[k])
-                    x1 = float(x_roi_um[k + 1])
-                    if y1 != y0:
-                        return float(x0 - y0 * (x1 - x0) / (y1 - y0))
-                    return float(0.5 * (x0 + x1))
-            return None
 
         def _find_opposite_peak_x(d_roi, x_roi_um, sign_run, i_start, i_end):
             if d_roi.size < 3:
@@ -1184,139 +1128,11 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         try:
             if rep_indices is not None:
                 defect_sequences_for_plot = sorted_df['rep'].values[rep_indices]
-                defect_reps_for_plot = sorted_df['rep'].values[rep_indices]
             else:
                 defect_sequences_for_plot = sorted_df['rep'].values
-                defect_reps_for_plot = sorted_df['rep'].values
         except Exception:
             defect_sequences_for_plot = None
-            defect_reps_for_plot = None
-        rep_opt_threshold_pos_by_rep = {}
-        rep_opt_threshold_neg_by_rep = {}
-        rep_opt_plateau_bounds_pos_by_rep = {}
-        rep_opt_plateau_bounds_neg_by_rep = {}
-        rep_opt_selection_mode_pos_by_rep = {}
-        rep_opt_selection_mode_neg_by_rep = {}
-
-        def _suggest_threshold_from_plateau(thr_values, avg_curve, current_thr, delta_tol, min_points):
-            """Choose threshold from the flattest (plateau) region of avg defects vs threshold."""
-            if len(thr_values) == 0 or len(avg_curve) == 0:
-                return float(current_thr), None, 'fallback-empty'
-            if len(thr_values) == 1:
-                return float(thr_values[0]), (float(thr_values[0]), float(thr_values[0])), 'single-point'
-
-            min_points = max(2, int(min_points))
-            delta_tol = max(0.0, float(delta_tol))
-
-            diffs = np.abs(np.diff(avg_curve))
-            flat_edges = diffs <= delta_tol
-
-            candidates = []
-            i = 0
-            while i < len(flat_edges):
-                if not flat_edges[i]:
-                    i += 1
-                    continue
-                j = i
-                while (j + 1) < len(flat_edges) and flat_edges[j + 1]:
-                    j += 1
-                start_idx = i
-                end_idx = j + 1  # edge run [i..j] maps to point run [i..j+1]
-                width_pts = end_idx - start_idx + 1
-                if width_pts >= min_points:
-                    mid_idx = (start_idx + end_idx) // 2
-                    dist_to_current = abs(float(thr_values[mid_idx]) - float(current_thr))
-                    candidates.append((width_pts, -dist_to_current, start_idx, end_idx, mid_idx))
-                i = j + 1
-
-            if len(candidates) > 0:
-                # widest plateau first, tie-breaker: closest to current threshold
-                candidates.sort(key=lambda c: (c[0], c[1]), reverse=True)
-                _, _, start_idx, end_idx, mid_idx = candidates[0]
-                return (
-                    float(thr_values[mid_idx]),
-                    (float(thr_values[start_idx]), float(thr_values[end_idx])),
-                    'plateau',
-                )
-
-            # Fallback: pick point next to minimum local change
-            min_diff_idx = int(np.argmin(diffs))
-            mid_idx = min_diff_idx + 1
-            start_idx = min_diff_idx
-            end_idx = min_diff_idx + 1
-            return (
-                float(thr_values[mid_idx]),
-                (float(thr_values[start_idx]), float(thr_values[end_idx])),
-                'fallback-min-diff',
-            )
-
-        # Initialize threshold arrays (used conditionally below)
-        thr_vals_pos = np.array([], dtype=float)
-        thr_vals_neg = np.array([], dtype=float)
-        
-        # Only perform threshold scan if explicitly enabled
-        if threshold_scan:
-            if threshold_scan_points < 2:
-                threshold_scan_points = 2
-            if threshold_scan_pos_max < threshold_scan_pos_min:
-                threshold_scan_pos_min, threshold_scan_pos_max = threshold_scan_pos_max, threshold_scan_pos_min
-            if threshold_scan_neg_max < threshold_scan_neg_min:
-                threshold_scan_neg_min, threshold_scan_neg_max = threshold_scan_neg_max, threshold_scan_neg_min
-            thr_vals_pos = np.linspace(threshold_scan_pos_min, threshold_scan_pos_max, threshold_scan_points)
-            thr_vals_neg = np.linspace(threshold_scan_neg_min, threshold_scan_neg_max, threshold_scan_points)
-
-            # Analyze optimal thresholds for each repetition (rep): one for positive peaks, one for negative peaks.
-            if defect_reps_for_plot is not None and len(defect_reps_for_plot) == len(d_rois):
-                rep_vals_all = np.asarray(defect_reps_for_plot)
-                for rep_val in np.sort(np.unique(rep_vals_all)):
-                    idx_rep = np.where(rep_vals_all == rep_val)[0]
-                    d_rois_rep = [d_rois[i] for i in idx_rep]
-                    if len(d_rois_rep) == 0:
-                        continue
-
-                    avg_counts_pos_rep, avg_counts_neg_rep = [], []
-                    for thr_pos in thr_vals_pos:
-                        c_pos = [len(_count_peak_indices_pos(d_roi, thr_pos)) for d_roi in d_rois_rep]
-                        avg_counts_pos_rep.append(float(np.mean(c_pos)) if len(c_pos) > 0 else 0.0)
-                    for thr_neg in thr_vals_neg:
-                        c_neg = [len(_count_peak_indices_neg(d_roi, thr_neg)) for d_roi in d_rois_rep]
-                        avg_counts_neg_rep.append(float(np.mean(c_neg)) if len(c_neg) > 0 else 0.0)
-                    avg_counts_pos_rep = np.asarray(avg_counts_pos_rep, dtype=float)
-                    avg_counts_neg_rep = np.asarray(avg_counts_neg_rep, dtype=float)
-
-                    suggested_thr_pos_rep, plateau_bounds_pos_rep, selection_mode_pos_rep = _suggest_threshold_from_plateau(
-                        thr_vals_pos,
-                        avg_counts_pos_rep,
-                        deriv_threshold_pos,
-                        plateau_delta_defects,
-                        plateau_min_points,
-                    )
-                    suggested_thr_neg_rep, plateau_bounds_neg_rep, selection_mode_neg_rep = _suggest_threshold_from_plateau(
-                        thr_vals_neg,
-                        avg_counts_neg_rep,
-                        deriv_threshold_neg,
-                        plateau_delta_defects,
-                        plateau_min_points,
-                    )
-
-                    rep_opt_threshold_pos_by_rep[rep_val] = float(suggested_thr_pos_rep)
-                    rep_opt_threshold_neg_by_rep[rep_val] = float(suggested_thr_neg_rep)
-                    rep_opt_plateau_bounds_pos_by_rep[rep_val] = plateau_bounds_pos_rep
-                    rep_opt_plateau_bounds_neg_by_rep[rep_val] = plateau_bounds_neg_rep
-                    rep_opt_selection_mode_pos_by_rep[rep_val] = selection_mode_pos_rep
-                    rep_opt_selection_mode_neg_by_rep[rep_val] = selection_mode_neg_rep
-
-                    bi_pos = int(np.argmin(np.abs(thr_vals_pos - suggested_thr_pos_rep)))
-                    bi_neg = int(np.argmin(np.abs(thr_vals_neg - suggested_thr_neg_rep)))
-                    print(
-                        f"KZ rep {int(rep_val)} optimal thresholds: pos={suggested_thr_pos_rep:.4f} "
-                        f"({selection_mode_pos_rep}, avg+={avg_counts_pos_rep[bi_pos]:.2f}), "
-                        f"neg={suggested_thr_neg_rep:.4f} "
-                        f"({selection_mode_neg_rep}, avg-={avg_counts_neg_rep[bi_neg]:.2f})"
-                    )
-
-        # Recount defects using optimal positive/negative thresholds per rep.
-        per_shot_thresholds = []
+        # Recount defects using fixed positive/negative thresholds.
         per_shot_counts = []
         defect_x, defect_y = [], []
         defect_x_pos, defect_y_pos = [], []
@@ -1326,19 +1142,11 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         corrected_total = 0
         rejected_total = 0
         x_roi_um = x_centers_um[xmin_ind:xmax_ind + 1]
-        rep_vals_for_count = np.asarray(defect_reps_for_plot) if defect_reps_for_plot is not None and len(defect_reps_for_plot) == len(d_rois) else None
         for i, yv in enumerate(y_final):
             d_roi = d_rois[i] if i < len(d_rois) else np.array([], dtype=float)
             m_roi = m_rois[i] if i < len(m_rois) else np.array([], dtype=float)
-            if rep_vals_for_count is not None:
-                rep_val_i = rep_vals_for_count[i]
-                thr_pos_i = float(rep_opt_threshold_pos_by_rep.get(rep_val_i, deriv_threshold_pos))
-                thr_neg_i = float(rep_opt_threshold_neg_by_rep.get(rep_val_i, deriv_threshold_neg))
-            else:
-                thr_pos_i = float(deriv_threshold_pos)
-                thr_neg_i = float(deriv_threshold_neg)
-
-            per_shot_thresholds.append(f"+{thr_pos_i:.3f}/{thr_neg_i:.3f}")
+            thr_pos_i = float(deriv_threshold_pos)
+            thr_neg_i = float(deriv_threshold_neg)
             if d_roi.size < 3:
                 per_shot_counts.append(0)
                 continue
@@ -1396,20 +1204,15 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                         i_start = int(run[p][0])
                         i_end = int(run[p + 1][0])
                         sign_pair = run[p][1]
-                        if missed_defect_correction_method in ('zero_crossing', 'both'):
-                            zx = _find_zero_crossing_x(m_roi, x_roi_um, i_start, i_end)
-                            if zx is not None:
-                                candidates.append(float(zx))
-                        if missed_defect_correction_method in ('opposite_peak', 'both'):
-                            ox = _find_opposite_peak_x(
-                                d_roi,
-                                x_roi_um,
-                                sign_pair,
-                                i_start,
-                                i_end,
-                            )
-                            if ox is not None:
-                                candidates.append(float(ox))
+                        ox = _find_opposite_peak_x(
+                            d_roi,
+                            x_roi_um,
+                            sign_pair,
+                            i_start,
+                            i_end,
+                        )
+                        if ox is not None:
+                            candidates.append(float(ox))
 
                     for cx in candidates:
                         if peak_thr_x.size == 0:
@@ -1455,7 +1258,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         defect_points_corrected = (np.asarray(defect_x_corr), np.asarray(defect_y_corr))
         defect_points_rejected = (np.asarray(defect_x_rej), np.asarray(defect_y_rej))
         defect_counts_for_plot = np.asarray(per_shot_counts, dtype=int)
-        defect_thresholds_for_plot = np.asarray(per_shot_thresholds, dtype=object)
+        defect_thresholds_for_plot = None
 
         n_shots = len(per_shot_counts)
         total_defects = int(np.sum(per_shot_counts))
@@ -1467,8 +1270,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         print(
             f"KZ_defect_analysis: gaussian_sigma={gauss_sigma}, "
             f"base_thresholds=(+{deriv_threshold_pos:.4f}, {deriv_threshold_neg:.4f}), "
-            f"per-rep-optimal={'on' if len(rep_opt_threshold_pos_by_rep) > 0 else 'off'}, "
-            f"missed_defect_method={missed_defect_correction_method}, "
+            f"missed_defect_method=opposite_peak, "
             f"peak_step_filter={'on' if peak_step_filter_enabled else 'off'}"
             f"(N={peak_step_filter_window_px}, min|Δm|={peak_step_filter_min_abs_delta_m:.3f}), "
             f"x_window_um=[{x_min_um:.1f}, {x_max_um:.1f}], "
@@ -1538,198 +1340,15 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             ax_hs.grid(True, alpha=0.25)
             print(f"Defect sizes: mean={mean_size:.3f} µm, std={std_size:.3f} µm, median={float(np.median(all_defect_sizes)):.3f} µm, N={len(all_defect_sizes)}")
 
-        if threshold_scan and len(d_rois) > 0:
-            # Plot this process in the selected single-repetition analyses.
-            if defect_reps_for_plot is not None and len(defect_reps_for_plot) == len(d_rois):
-                try:
-                    rep_vals = np.asarray(defect_reps_for_plot)
-                    rep_unique = np.sort(np.unique(rep_vals))
-                    n_reps = max(1, threshold_scan_first_n_sequences)
-                    rep_selected = rep_unique[:n_reps]
-                    print(f"\nPer-repetition (+/-) threshold analysis (first {len(rep_selected)} repetitions):")
-
-                    for rep_val in rep_selected:
-                        idx = np.where(rep_vals == rep_val)[0]
-                        d_rois_rep = [d_rois[i] for i in idx]
-                        if len(d_rois_rep) == 0:
-                            continue
-
-                        counts_per_rep_pos, counts_per_rep_neg = [], []
-                        for thr_pos in thr_vals_pos:
-                            counts_per_rep_pos.append([len(_count_peak_indices_pos(d_roi, thr_pos)) for d_roi in d_rois_rep])
-                        for thr_neg in thr_vals_neg:
-                            counts_per_rep_neg.append([len(_count_peak_indices_neg(d_roi, thr_neg)) for d_roi in d_rois_rep])
-
-                        mat_pos = np.asarray(counts_per_rep_pos, dtype=float).T
-                        mat_neg = np.asarray(counts_per_rep_neg, dtype=float).T
-                        if mat_pos.ndim != 2 or mat_pos.shape[0] == 0 or mat_neg.ndim != 2 or mat_neg.shape[0] == 0:
-                            continue
-
-                        shot_number_used = max(1, single_rep_shot_number)
-                        shot_idx_used = min(shot_number_used - 1, mat_pos.shape[0] - 1)
-                        curve_pos = mat_pos[shot_idx_used]
-                        curve_neg = mat_neg[shot_idx_used]
-
-                        sug_pos = float(rep_opt_threshold_pos_by_rep.get(rep_val, deriv_threshold_pos))
-                        sug_neg = float(rep_opt_threshold_neg_by_rep.get(rep_val, deriv_threshold_neg))
-                        pb_pos = rep_opt_plateau_bounds_pos_by_rep.get(rep_val, None)
-                        pb_neg = rep_opt_plateau_bounds_neg_by_rep.get(rep_val, None)
-                        mode_pos = rep_opt_selection_mode_pos_by_rep.get(rep_val, 'fallback-current-threshold')
-                        mode_neg = rep_opt_selection_mode_neg_by_rep.get(rep_val, 'fallback-current-threshold')
-
-                        i_pos = int(np.argmin(np.abs(thr_vals_pos - sug_pos)))
-                        i_neg = int(np.argmin(np.abs(thr_vals_neg - sug_neg)))
-
-                        shot_global_idx = int(idx[shot_idx_used])
-                        x_roi_um_local = x_centers_um[xmin_ind:xmax_ind + 1]
-
-                        m_raw_sel = np.asarray(M_final[shot_global_idx], dtype=float)
-                        if gauss_sigma > 0:
-                            m_smooth_sel = gaussian_filter1d(m_raw_sel, sigma=gauss_sigma)
-                        else:
-                            m_smooth_sel = m_raw_sel.copy()
-                        m_raw_roi_sel = m_raw_sel[xmin_ind:xmax_ind + 1]
-                        m_smooth_roi_sel = m_smooth_sel[xmin_ind:xmax_ind + 1]
-                        d_roi_sel = np.gradient(m_smooth_sel)[xmin_ind:xmax_ind + 1]
-
-                        peak_pos_sel = _count_peak_indices_pos(d_roi_sel, sug_pos)
-                        peak_neg_sel = _count_peak_indices_neg(d_roi_sel, sug_neg)
-
-                        fig_rep, axs_rep = plt.subplots(nrows=3, figsize=(11.0, 9.0), tight_layout=True)
-                        ax_map, ax_mag, ax_der = axs_rep
-
-                        im = None
-                        cbar_label = 'Magnetization m'
-                        raw_row_idx = int(rep_indices[shot_global_idx]) if rep_indices is not None else int(shot_global_idx)
-                        try:
-                            row = sorted_df.iloc[raw_row_idx]
-                            m1_2d = None
-                            m2_2d = None
-                            cam_candidates = [
-                                (data_origin, 'PTAI_m1'),
-                                ('show_ODs', 'PTAI_m1'),
-                                (data_origin, 'm1_2d'),
-                            ]
-                            for c in cam_candidates:
-                                if c in sorted_df.columns:
-                                    arr = np.asarray(row[c])
-                                    if arr.ndim == 2:
-                                        m1_2d = arr.astype(float)
-                                        break
-                            cam2_candidates = [
-                                (data_origin, 'PTAI_m2'),
-                                ('show_ODs', 'PTAI_m2'),
-                                (data_origin, 'm2_2d'),
-                            ]
-                            for c in cam2_candidates:
-                                if c in sorted_df.columns:
-                                    arr = np.asarray(row[c])
-                                    if arr.ndim == 2:
-                                        m2_2d = arr.astype(float)
-                                        break
-
-                            if m1_2d is not None and m2_2d is not None:
-                                d2d = m1_2d + m2_2d
-                                with np.errstate(divide='ignore', invalid='ignore'):
-                                    z2d = np.divide(m2_2d - m1_2d, d2d, out=np.zeros_like(d2d), where=d2d != 0)
-                                im = ax_map.imshow(z2d, aspect='auto', cmap='RdBu', vmin=-1.0, vmax=1.0)
-                                cbar_label = 'Magnetization m'
-                                ax_map.set_title('Camera image of selected rep (2D magnetization)')
-                            elif m1_2d is not None:
-                                im = ax_map.imshow(m1_2d, aspect='auto', cmap='gist_stern')
-                                cbar_label = 'OD (m1)'
-                                ax_map.set_title('Camera image of selected rep (m1)')
-
-                            if im is not None:
-                                ax_map.axvline(float(xmin_ind), color='w', linestyle='--', linewidth=1.0, alpha=0.9)
-                                ax_map.axvline(float(xmax_ind), color='w', linestyle='--', linewidth=1.0, alpha=0.9)
-                                ax_map.set_ylabel('y (px)')
-                        except Exception:
-                            im = None
-
-                        if im is None:
-                            m_roi_stack = np.asarray(
-                                [M_final[int(ii)][xmin_ind:xmax_ind + 1] for ii in idx],
-                                dtype=float,
-                            )
-                            im = ax_map.imshow(
-                                m_roi_stack,
-                                aspect='auto',
-                                cmap='RdBu',
-                                vmin=-1.0,
-                                vmax=1.0,
-                                extent=[float(x_roi_um_local[0]), float(x_roi_um_local[-1]), float(len(idx)), 1.0],
-                            )
-                            ax_map.axhline(float(shot_idx_used + 1), color='k', linestyle='--', linewidth=1.0, alpha=0.8)
-                            ax_map.set_ylabel('Shot in repetition')
-                            ax_map.set_title('Relative magnetization colormap (KZ ROI, fallback)')
-                        cbar = fig_rep.colorbar(im, ax=ax_map, fraction=0.025, pad=0.015)
-                        cbar.set_label(cbar_label)
-
-                        ax_mag.plot(x_roi_um_local, m_raw_roi_sel, color='0.35', linewidth=1.3, label='magnetization')
-                        ax_mag.plot(
-                            x_roi_um_local,
-                            m_smooth_roi_sel,
-                            color='k',
-                            linewidth=1.5,
-                            label=f'smoothed magnetization (σ={gauss_sigma:g})',
-                        )
-                        ax_mag.axhline(0.0, color='0.6', linestyle=':', linewidth=1.0)
-                        ax_mag.set_ylabel('m')
-                        ax_mag.set_title('Magnetization and smoothed signal')
-                        ax_mag.grid(True, alpha=0.25)
-                        ax_mag.legend(loc='best', fontsize=8)
-
-                        ax_der.plot(x_roi_um_local, d_roi_sel, color='0.2', linewidth=1.2, label=r'$\partial m / \partial x$')
-                        if peak_pos_sel.size > 0:
-                            ax_der.scatter(
-                                x_roi_um_local[peak_pos_sel],
-                                d_roi_sel[peak_pos_sel],
-                                color='tab:blue',
-                                marker='x',
-                                s=36,
-                                linewidths=1.2,
-                                label='positive peaks',
-                            )
-                        if peak_neg_sel.size > 0:
-                            ax_der.scatter(
-                                x_roi_um_local[peak_neg_sel],
-                                d_roi_sel[peak_neg_sel],
-                                color='tab:red',
-                                marker='x',
-                                s=36,
-                                linewidths=1.2,
-                                label='negative peaks',
-                            )
-                        ax_der.axhline(sug_pos, color='tab:blue', linestyle='--', linewidth=1.2, label=f'+ threshold = {sug_pos:.3f}')
-                        ax_der.axhline(sug_neg, color='tab:red', linestyle='--', linewidth=1.2, label=f'- threshold = {sug_neg:.3f}')
-                        ax_der.axhline(0.0, color='0.6', linestyle=':', linewidth=1.0)
-                        ax_der.set_xlabel('x (µm)')
-                        ax_der.set_ylabel(r'$\partial m / \partial x$')
-                        ax_der.set_title('Derivative with detected peaks and thresholds')
-                        ax_der.grid(True, alpha=0.25)
-                        ax_der.legend(loc='best', fontsize=8)
-
-                        fig_rep.suptitle(
-                            f'KZ threshold diagnostics - Repetition {int(rep_val)} (shot {shot_idx_used + 1} of {len(d_rois_rep)})',
-                            fontsize=10,
-                        )
-
-                        print(
-                            f"  Rep {int(rep_val)}: shots={len(d_rois_rep)}, curve_shot={shot_idx_used + 1}, "
-                            f"+thr={sug_pos:.4f} ({mode_pos}, N+={curve_pos[i_pos]:.1f}), "
-                            f"-thr={sug_neg:.4f} ({mode_neg}, N-={curve_neg[i_neg]:.1f})"
-                        )
-                except Exception as err:
-                    print(f"Warning: could not compute per-repetition +/- threshold scan: {err}")
+        # Threshold-scan diagnostics were removed for KZ_defect_analysis.
 
     if scan == 'KZ_det_scan':
         # Plot defects/shot vs ARPKZ_final_set_field using the same logic and parameters as KZ_defect_analysis.
-        gauss_sigma_det = 2.0
-        deriv_threshold_det = 0.09
-        deriv_thr_pos_det = 0.09
-        deriv_thr_neg_det = -0.09
-        threshold_scan_det = True
+        gauss_sigma_det = 0.3
+        deriv_threshold_det = 0.055
+        deriv_thr_pos_det = 0.055
+        deriv_thr_neg_det = -0.035
+        threshold_scan_det = False
         threshold_scan_min_det = 0.02
         threshold_scan_max_det = 0.20
         threshold_scan_pos_min_det = 0.02
@@ -1744,21 +1363,14 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         peak_step_filter_window_px_det = 4
         peak_step_filter_min_abs_delta_m_det = 0.3
         min_same_sign_peak_distance_um_det = 4.0
-        missed_defect_correction_method_det = 'zero_crossing'
-
-        # Primary source of criteria: MODE_CONFIGS['KZ_defect_analysis']['defect_analysis']
-        # Optional per-mode override: current mode_cfg['defect_analysis']
+        missed_defect_correction_method_det = 'opposite_peak'
         try:
-            kz_ref_cfg = {}
-            try:
-                from . import waterfall_config as _wf_cfg  # type: ignore
-            except Exception:
-                import waterfall_config as _wf_cfg  # type: ignore
+            from waterfall_config import MODE_CONFIGS as _wf_mode_configs
             kz_ref_cfg = (
-                _wf_cfg.MODE_CONFIGS.get('KZ_defect_analysis', {}).get('defect_analysis', {})
-                if hasattr(_wf_cfg, 'MODE_CONFIGS') else {}
+                _wf_mode_configs.get('KZ_defect_analysis', {}).get('defect_analysis', {})
+                if hasattr(_wf_mode_configs, 'get')
+                else {}
             )
-
             det_cfg_override = mode_cfg.get('defect_analysis', {}) if isinstance(mode_cfg, dict) else {}
             det_cfg = dict(kz_ref_cfg)
             det_cfg.update(det_cfg_override)
@@ -1768,15 +1380,6 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             deriv_thr_pos_det = float(det_cfg.get('derivative_threshold_pos', deriv_thr_pos_det))
             deriv_thr_neg_det = float(det_cfg.get('derivative_threshold_neg', -abs(deriv_thr_pos_det)))
             threshold_scan_det = bool(det_cfg.get('threshold_scan', threshold_scan_det))
-            threshold_scan_min_det = float(det_cfg.get('threshold_scan_min', threshold_scan_min_det))
-            threshold_scan_max_det = float(det_cfg.get('threshold_scan_max', threshold_scan_max_det))
-            threshold_scan_pos_min_det = float(det_cfg.get('threshold_scan_pos_min', threshold_scan_pos_min_det))
-            threshold_scan_pos_max_det = float(det_cfg.get('threshold_scan_pos_max', threshold_scan_pos_max_det))
-            threshold_scan_neg_min_det = float(det_cfg.get('threshold_scan_neg_min', -threshold_scan_pos_max_det))
-            threshold_scan_neg_max_det = float(det_cfg.get('threshold_scan_neg_max', -threshold_scan_pos_min_det))
-            threshold_scan_points_det = int(det_cfg.get('threshold_scan_points', threshold_scan_points_det))
-            plateau_delta_defects_det = float(det_cfg.get('plateau_delta_defects', plateau_delta_defects_det))
-            plateau_min_points_det = int(det_cfg.get('plateau_min_points', plateau_min_points_det))
             zero_cross_min_dist_um_det = float(det_cfg.get('zero_crossing_min_distance_um', zero_cross_min_dist_um_det))
             peak_step_filter_enabled_det = bool(det_cfg.get('peak_step_filter_enabled', peak_step_filter_enabled_det))
             peak_step_filter_window_px_det = int(det_cfg.get('peak_step_filter_window_px', peak_step_filter_window_px_det))
@@ -1791,7 +1394,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         peak_step_filter_min_abs_delta_m_det = max(0.0, float(peak_step_filter_min_abs_delta_m_det))
         min_same_sign_peak_distance_um_det = max(0.0, float(min_same_sign_peak_distance_um_det))
         if missed_defect_correction_method_det not in ('zero_crossing', 'opposite_peak', 'both'):
-            missed_defect_correction_method_det = 'zero_crossing'
+            missed_defect_correction_method_det = 'opposite_peak'
 
         x_centers_um_det = np.arange(M_full.shape[1]) * um_per_px
         x_min_um_det = float(params['X_MIN_INTEGRATION'])
@@ -2002,6 +1605,15 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
 
         thr_pos_per_shot = np.full(det_x_raw.shape, float(deriv_thr_pos_det), dtype=float)
         thr_neg_per_shot = np.full(det_x_raw.shape, float(deriv_thr_neg_det), dtype=float)
+        print(
+            "KZ_det_scan settings: "
+            f"gaussian_sigma={gauss_sigma_det:g}, "
+            f"base_thresholds=(+{deriv_thr_pos_det:.4f}, {deriv_thr_neg_det:.4f}), "
+            f"threshold_scan={'on' if threshold_scan_det else 'off'}, "
+            f"missed_defect_method={missed_defect_correction_method_det}, "
+            f"peak_step_filter={'on' if peak_step_filter_enabled_det else 'off'}"
+            f"(N={peak_step_filter_window_px_det}, min|Δm|={peak_step_filter_min_abs_delta_m_det:.3f})"
+        )
         if threshold_scan_det:
             for det_val, idx_det in zip(det_group_vals, det_group_indices):
                 d_rois_group = [d_rois_det[ii] for ii in idx_det]
@@ -2241,62 +1853,103 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                     f"defects/region={det_mean[idx0]:.5f} ± {det_sem[idx0]:.5f} um^-1"
                 )
 
-            # Interpolate det where domain balance crosses zero, then interpolate
-            # defects/region at that det. Error is the average SEM of the two
-            # bracketing points.
-            valid_interp = np.isfinite(det_unique) & np.isfinite(det_dom_mean) & np.isfinite(det_mean)
-            if np.count_nonzero(valid_interp) >= 2:
-                x_det = det_unique[valid_interp]
-                y_dom = det_dom_mean[valid_interp]
-                y_dom_sem = det_dom_sem[valid_interp]
-                y_def = det_mean[valid_interp]
-                y_def_sem = det_sem[valid_interp]
+            # Requested fit-based estimate around domain_balance~0:
+            # 1) linear fit to domain-balance points with |balance| <= fit_window
+            # 2) parabolic fit to defects/region for the SAME det points
+            # 3) evaluate defects/region at det where fitted domain balance is zero.
+            fit_window = 0.3
+            if isinstance(mode_cfg, dict):
+                fit_window = float(mode_cfg.get('domain_balance_fit_window', 0.3))
+            fit_mask = (
+                np.isfinite(det_unique)
+                & np.isfinite(det_dom_mean)
+                & np.isfinite(det_mean)
+                & (np.abs(det_dom_mean) <= fit_window)
+            )
 
-                order = np.argsort(x_det)
-                x_det = x_det[order]
-                y_dom = y_dom[order]
-                y_dom_sem = y_dom_sem[order]
-                y_def = y_def[order]
-                y_def_sem = y_def_sem[order]
+            det_zero_fit = None
+            def_at_zero_fit = None
+            def_at_zero_fit_err = np.nan
+            fit_text = None
+            dom_lin_coeffs = None
+            def_par_coeffs = None
+            x_fit_span = None
 
-                i_cross = None
-                for ii in range(len(x_det) - 1):
-                    y0 = float(y_dom[ii])
-                    y1 = float(y_dom[ii + 1])
-                    if y0 == 0.0 or y1 == 0.0 or (y0 * y1 < 0.0):
-                        i_cross = ii
-                        break
+            if np.count_nonzero(fit_mask) >= 3:
+                x_fit = np.asarray(det_unique[fit_mask], dtype=float)
+                y_dom_fit = np.asarray(det_dom_mean[fit_mask], dtype=float)
+                y_def_fit = np.asarray(det_mean[fit_mask], dtype=float)
+                y_def_sem_fit = np.asarray(det_sem[fit_mask], dtype=float)
 
-                if i_cross is not None:
-                    x0 = float(x_det[i_cross])
-                    x1 = float(x_det[i_cross + 1])
-                    yd0 = float(y_dom[i_cross])
-                    yd1 = float(y_dom[i_cross + 1])
-                    yf0 = float(y_def[i_cross])
-                    yf1 = float(y_def[i_cross + 1])
+                order = np.argsort(x_fit)
+                x_fit = x_fit[order]
+                y_dom_fit = y_dom_fit[order]
+                y_def_fit = y_def_fit[order]
+                y_def_sem_fit = y_def_sem_fit[order]
 
-                    if yd1 == yd0:
-                        det_zero = 0.5 * (x0 + x1)
+                # Linear fit: domain balance vs det
+                dom_lin = np.polyfit(x_fit, y_dom_fit, 1)
+                dom_slope = float(dom_lin[0])
+                dom_intercept = float(dom_lin[1])
+                dom_lin_coeffs = np.asarray(dom_lin, dtype=float)
+                x_fit_span = (float(np.min(x_fit)), float(np.max(x_fit)))
+
+                if abs(dom_slope) > 1e-12:
+                    det_zero_fit = float(-dom_intercept / dom_slope)
+
+                    # Constrained parabolic fit with forced vertex at det_zero_fit:
+                    # y = a * (x - det_zero_fit)^2 + c
+                    # Then the parabolic peak/minimum is exactly at det_zero_fit.
+                    u = (x_fit - det_zero_fit) ** 2
+                    Xq = np.column_stack([u, np.ones_like(u)])
+                    beta, _, rank, _ = np.linalg.lstsq(Xq, y_def_fit, rcond=None)
+                    a_q = float(beta[0])
+                    c_q = float(beta[1])
+                    def_par_coeffs = (a_q, c_q, float(det_zero_fit))
+
+                    def_at_zero_fit = c_q
+
+                    # Requested uncertainty: average error bar (SEM) of the
+                    # defect-density points used in the parabolic fit.
+                    sem_used = y_def_sem_fit[np.isfinite(y_def_sem_fit)]
+                    if sem_used.size > 0:
+                        def_at_zero_fit_err = float(np.mean(sem_used))
+
+                    if np.isfinite(def_at_zero_fit_err):
+                        fit_text = (
+                            rf"fit @ domain balance$=0$: "
+                            rf"$\rho_d={def_at_zero_fit:.5f}\pm{def_at_zero_fit_err:.5f}\,\mu m^{{-1}}$"
+                        )
                     else:
-                        det_zero = float(x0 + (0.0 - yd0) * (x1 - x0) / (yd1 - yd0))
+                        fit_text = (
+                            rf"fit @ domain balance$=0$: "
+                            rf"$\rho_d={def_at_zero_fit:.5f}\,\mu m^{{-1}}$"
+                        )
 
-                    if x1 == x0:
-                        def_at_zero = 0.5 * (yf0 + yf1)
+                    if np.isfinite(def_at_zero_fit_err):
+                        print(
+                            "KZ_det_scan fit-based domain_balance=0: "
+                            f"det={det_zero_fit:.6g}, "
+                            f"defects/region={def_at_zero_fit:.5f} ± {def_at_zero_fit_err:.5f} um^-1 "
+                            f"(fit window |domain_balance| <= {fit_window}, constrained parabola vertex at this det)"
+                        )
                     else:
-                        def_at_zero = float(yf0 + (det_zero - x0) * (yf1 - yf0) / (x1 - x0))
-
-                    err_dom = 0.5 * (float(y_dom_sem[i_cross]) + float(y_dom_sem[i_cross + 1]))
-                    err_def = 0.5 * (float(y_def_sem[i_cross]) + float(y_def_sem[i_cross + 1]))
-
-                    print(
-                        "KZ_det_scan interpolated domain_balance=0 crossing: "
-                        f"det={det_zero:.6g}, "
-                        f"domain_balance=0 ± {err_dom:.5f}, "
-                        f"defects/region={def_at_zero:.5f} ± {err_def:.5f} um^-1 "
-                        f"(between det={x0:.6g} and {x1:.6g})"
-                    )
+                        print(
+                            "KZ_det_scan fit-based domain_balance=0: "
+                            f"det={det_zero_fit:.6g}, "
+                            f"defects/region={def_at_zero_fit:.5f} um^-1 "
+                            f"(fit window |domain_balance| <= {fit_window}; constrained parabola vertex at this det; fit uncertainty unavailable)"
+                        )
                 else:
-                    print("KZ_det_scan: no sign change in averaged domain balance; cannot interpolate domain_balance=0 crossing.")
+                    print(
+                        "KZ_det_scan: linear fit slope is ~0 for domain balance; "
+                        "cannot compute det at domain_balance=0."
+                    )
+            else:
+                print(
+                    "KZ_det_scan: not enough points with |domain_balance| <= 0.3 "
+                    "for requested linear/parabolic fit."
+                )
 
             # Overlay domain-balance metric on the same figure with a second y-axis.
             ax_dom = ax_det.twinx()
@@ -2329,10 +1982,60 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             ax_dom.set_ylabel(r'Domain balance $(L_{+}-L_{-})/L_{used}$')
             ax_dom.grid(False)
 
+            # Show fit curves explicitly in the same x-range used for fitting.
+            if x_fit_span is not None:
+                x_fit_curve = np.linspace(x_fit_span[0], x_fit_span[1], 300)
+                if dom_lin_coeffs is not None:
+                    y_dom_curve = np.polyval(dom_lin_coeffs, x_fit_curve)
+                    ax_dom.plot(
+                        x_fit_curve,
+                        y_dom_curve,
+                        color='purple',
+                        linestyle='--',
+                        linewidth=1.7,
+                        alpha=0.95,
+                        label=r'linear fit ($|balance|\leq0.3$)',
+                    )
+                if def_par_coeffs is not None:
+                    a_q, c_q, x0_q = def_par_coeffs
+                    y_def_curve = a_q * (x_fit_curve - x0_q) ** 2 + c_q
+                    ax_det.plot(
+                        x_fit_curve,
+                        y_def_curve,
+                        color='tab:blue',
+                        linestyle='--',
+                        linewidth=1.9,
+                        alpha=0.95,
+                        label=r'parabolic fit (vertex fixed at domain-balance $=0$)',
+                    )
+
+            if det_zero_fit is not None and np.isfinite(det_zero_fit):
+                ax_det.axvline(
+                    det_zero_fit,
+                    color='red',
+                    linestyle='--',
+                    linewidth=1.4,
+                    alpha=0.9,
+                    label='fit: domain balance = 0',
+                    zorder=20,
+                )
+                if fit_text is not None:
+                    ax_det.text(
+                        0.02,
+                        0.93,
+                        fit_text,
+                        transform=ax_det.transAxes,
+                        ha='left',
+                        va='top',
+                        fontsize=9,
+                        color='red',
+                        bbox=dict(facecolor='white', edgecolor='red', alpha=0.75, boxstyle='round,pad=0.25'),
+                    )
+
             # Merge legends from both y-axes.
             h1, l1 = ax_det.get_legend_handles_labels()
             h2, l2 = ax_dom.get_legend_handles_labels()
-            ax_det.legend(h1 + h2, l1 + l2, loc='best', fontsize=8)
+            ax_det.legend(h1 + h2, l1 + l2, loc='lower left', fontsize=8)
 
             # Second waterfall: all raw magnetization profiles (single shots) ordered by det.
             # Keep layout static for interactive zoom/pan: tight_layout can

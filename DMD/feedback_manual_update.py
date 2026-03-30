@@ -67,97 +67,47 @@ REPETITION = 33            # Repetition number
 ERROR_PROFILES = [
     {
         'filename': 'sigmoid_center_interpolation0.txt',
-        'kp': 1.,
+        'kp': 1.5,
         'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
     },
     {
         'filename': 'sigmoid_center_interpolation1.txt',
-        'kp': 1.,
+        'kp': 1.5,
         'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
     },
     {
         'filename': 'sigmoid_center_interpolation2.txt',
-        'kp': .8,
-        'smoothing_sigma': 2.0,  # Optional override for default smoothing sigma
+        'kp': 0.8,
+        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
     },
     {
         'filename': 'sigmoid_center_interpolation3.txt',
-        'kp': .8,
-        'smoothing_sigma': 2.0,  # Optional override for default smoothing sigma
+        'kp': 0.5,
+        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
     },
     {
         'filename': 'sigmoid_center_interpolation4.txt',
-        'kp': .5,
-        'smoothing_sigma': 2.0,  # Optional override for default smoothing sigma
+        'kp': 0.8,
+        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
     },
     {
         'filename': 'sigmoid_center_interpolation5.txt',
-        'kp': .5,
-        'smoothing_sigma': 2.0,  # Optional override for default smoothing sigma
+        'kp': 0.5,
+        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
     },
     {
         'filename': 'sigmoid_center_interpolation6.txt',
-        'kp': .8,
-        'smoothing_sigma': 2.0,  # Optional override for default smoothing sigma
+        'kp': 1.2,
+        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
     },
     {
         'filename': 'sigmoid_center_interpolation7.txt',
-        'kp': .8,
-        'smoothing_sigma': 2.0,  # Optional override for default smoothing sigma
+        'kp': 0.8,
+        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
     },
     {
         'filename': 'sigmoid_center_interpolation8.txt',
-        'kp': .5,
-        'smoothing_sigma': 2.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation9.txt',
-        'kp': .8,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation11.txt',
-        'kp': .5,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation12.txt',
-        'kp': .5,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation13.txt',
-        'kp': .5,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation14.txt',
-        'kp': .5,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation15.txt',
-        'kp': .5,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation16.txt',
-        'kp': .5,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation17.txt',
-        'kp': .5,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation18.txt',
-        'kp': .5,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation19.txt',
-        'kp': .5,
+        'kp': 0.5,
         'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
     },
 ]

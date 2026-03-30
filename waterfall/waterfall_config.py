@@ -4,7 +4,11 @@ import numpy as np
 ACTIVE_MODE = 'ARP_Backward'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
 # Optional override for sequence indices used by ACTIVE_MODE (set to None to use mode default)
 
-SEQS = [14,15]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
+# If True, use recommended_center from the latest
+# results/kz_param_stability_safe_box_*.json.
+RECOMMENDED_CENTER = False
+
+SEQS = [3,4,5,6,7]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
 #SEQS=[33,34,35,36,37,38]
 #47,48,49,50,51,52
 # -------------------------
@@ -108,6 +112,7 @@ MODE_CONFIGS = {
             'corr_mag_density': False,
         },
         'globals_in_title': [],
+        'domain_balance_fit_window': 0.5,  # Domain balance range for constrained fit: points with |balance| <= this value
     },
     'KZ_reps': {
         'scan': 'ARP_KZ_reps',
@@ -204,43 +209,31 @@ MODE_CONFIGS = {
         'seqs': [],  # Set your sequence indices
         'data_origin': 'show_ODs',
         'defect_analysis': {
-            'gaussian_sigma': .3,      # Gaussian smoothing radius (sigma, in pixels)
-            'derivative_threshold': 0.0,  # Backward-compatible base magnitude for thresholds
-            'derivative_threshold_pos': 0.02,  # +dM/dx threshold for positive peaks
-            'derivative_threshold_neg': -0.02,  # -dM/dx threshold for negative peaks
-            'threshold_scan': False,     # Enable threshold scans
-            'threshold_scan_min': 0.06,
-            'threshold_scan_max': 0.1,
-            'threshold_scan_pos_min': 0.06,
-            'threshold_scan_pos_max': 0.10,
-            'threshold_scan_neg_min': -0.10,
-            'threshold_scan_neg_max': -0.05,
-            'threshold_scan_points': 50,
-            'threshold_scan_first_n_sequences': 3,  # Do threshold scan separately for first N repetitions (rep)
-            'single_rep_shot_number': 3,  # In each repetition plot, show only this shot number (1-based)
-            'plateau_delta_defects': 0.05,  # Plateau criterion: |Δ(defects/shot)| <= this between adjacent thresholds
-            'plateau_min_points': 3,  # Minimum number of threshold points for a valid plateau
-            'zero_crossing_min_distance_um': 3.0,  # Accept zero-crossing correction only if >= this distance from threshold peaks
-            # Optional post-threshold false-positive filter:
-            # For each threshold peak, require |mean(m right N px) - mean(m left N px)| >= min_abs_delta_m.
+            # 1) Signal preprocessing
+            'gaussian_sigma': 0.3,                 # Gaussian smoothing sigma (pixels)
+
+            # 2) Peak detection on dM/dx
+            'derivative_threshold': 0.0,           # Backward-compatible base magnitude
+            'derivative_threshold_pos': 0.055,     # +dM/dx threshold for positive peaks
+            'derivative_threshold_neg': -0.035,    # -dM/dx threshold for negative peaks
+
+            # 3) Post-threshold peak quality filter (on magnetization step)
+            # Require |mean(m right N px) - mean(m left N px)| >= min_abs_delta_m
             # Rejected peaks are marked with black crosses and not counted.
             'peak_step_filter_enabled': True,
             'peak_step_filter_window_px': 4,
             'peak_step_filter_min_abs_delta_m': 0.1,
-            # Merge same-sign threshold peaks closer than this distance (um)
-            # into one defect at their midpoint.
-            'min_same_sign_peak_distance_um': 7.0,
-            # KZ_defect_analysis position-histogram half-window (counts defects
-            # within ±window around each 1-um center)
-            'defect_position_hist_half_window_um': 4.0,
-            # Missed-defect correction method for same-sign derivative runs:
-            # 'zero_crossing' (default), 'opposite_peak', or 'both'
-            'missed_defect_correction_method': 'opposite_peak',
-            'target_avg_peaks': 1.0,    # Optional reference line in plots (not used for plateau-based suggestion)
+
+            # 4) Geometric cleanup and correction
+            'min_same_sign_peak_distance_um': 7.0,  # merge same-sign peaks closer than this
+            'zero_crossing_min_distance_um': 3.0,   # min distance from kept threshold peaks for corrected defects
+
+            # 5) Histogram control
+            'defect_position_hist_half_window_um': 4.0,  # counts within ±window around 1-um centers
         },
         'constraints': {
             'ARPKZ_final_set_field': 130.395,  # Set to desired value (e.g., 130.429)
-            'ARPKZ_omega_ramp_time': 32.,  # Set to desired value
+            'ARPKZ_omega_ramp_time': 4.,  # Set to desired value
             'ARPKZ_waiting_time': 10.,  # Set to desired value
         },
         'average': False,

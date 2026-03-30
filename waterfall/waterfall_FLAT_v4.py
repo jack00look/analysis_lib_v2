@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import traceback
 import lyse
 import sys
@@ -15,9 +16,49 @@ LIB_PATH = "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/waterf
 
 def _load_module(path, name):
     spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f'Unable to load module spec from {path}')
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def _apply_recommended_center_if_enabled(cfg, mode_cfg):
+    if not bool(getattr(cfg, 'RECOMMENDED_CENTER', False)):
+        return mode_cfg
+
+    results_dir = os.path.join(os.path.dirname(CFG_PATH), 'results')
+    if not os.path.isdir(results_dir):
+        print(f"RECOMMENDED_CENTER=True but results dir not found: {results_dir}")
+        return mode_cfg
+
+    safe_box_files = sorted([
+        f for f in os.listdir(results_dir)
+        if f.startswith('kz_param_stability_safe_box_') and f.endswith('.json')
+    ])
+    if len(safe_box_files) == 0:
+        print('RECOMMENDED_CENTER=True but no safe-box file found in results/.')
+        return mode_cfg
+
+    latest_path = os.path.join(results_dir, safe_box_files[-1])
+    try:
+        with open(latest_path, 'r', encoding='utf-8') as f:
+            safe_box = json.load(f)
+        rec = safe_box.get('recommended_center', {})
+        if not isinstance(rec, dict) or len(rec) == 0:
+            print(f'RECOMMENDED_CENTER=True but recommended_center missing/empty in {latest_path}')
+            return mode_cfg
+
+        out = dict(mode_cfg)
+        current_defect = dict(out.get('defect_analysis', {}))
+        current_defect.update(rec)
+        out['defect_analysis'] = current_defect
+        print(f"Applied recommended_center from: {latest_path}")
+        print(f"Updated defect_analysis keys: {sorted(list(rec.keys()))}")
+        return out
+    except Exception as err:
+        print(f'Failed to load recommended_center from {latest_path}: {err}')
+        return mode_cfg
 
 
 if __name__ == "__main__":
@@ -78,6 +119,7 @@ if __name__ == "__main__":
         mode_cfg = dict(cfg.MODE_CONFIGS[mode_name])
         if hasattr(cfg, 'SEQS') and cfg.SEQS is not None:
             mode_cfg['seqs'] = cfg.SEQS
+        mode_cfg = _apply_recommended_center_if_enabled(cfg, mode_cfg)
         lib.run_mode(df_orig, mode_cfg, cfg.PARAMS)
 
     except Exception as e:
