@@ -50,13 +50,20 @@ spec.loader.exec_module(settings_mod)
 # CONFIGURATION - EDIT THESE PARAMETERS
 # =============================================================================
 
-# Previous shot specification (starting DMD profile source)
+# Initial DMD profile source (choose ONE of the two options below):
+# Option 1: Load from a previous shot's h5 file
+USE_H5_PROFILE = False          # Set to True to load from h5 file, False to load from txt
 YEAR = 2026
 MONTH = 3
-DAY = 24
+DAY = 30
 SEQUENCE = 2               # Sequence number (integer)
-ITERATION = 0                # Iteration number
-REPETITION = 33            # Repetition number
+ITERATION = 8                # Iteration number
+REPETITION = 38            # Repetition number
+
+# Option 2: Load from a txt file (set USE_H5_PROFILE to False to use this)
+# Format: two columns (x_um, profile_y), tab or space delimited
+# Lines starting with # are treated as comments
+PROFILE_TXT_FILE = 'dmd_profile_20260331_103346.txt'  # Path relative to DMD folder or absolute
 
 # Error profiles (in DMD feedback folder)
 # Each item must define:
@@ -67,48 +74,8 @@ REPETITION = 33            # Repetition number
 ERROR_PROFILES = [
     {
         'filename': 'sigmoid_center_interpolation0.txt',
-        'kp': 1.5,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation1.txt',
-        'kp': 1.5,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation2.txt',
-        'kp': 0.8,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation3.txt',
-        'kp': 0.5,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation4.txt',
-        'kp': 0.8,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation5.txt',
-        'kp': 0.5,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation6.txt',
         'kp': 1.2,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation7.txt',
-        'kp': 0.8,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
-    },
-    {
-        'filename': 'sigmoid_center_interpolation8.txt',
-        'kp': 0.5,
-        'smoothing_sigma': 5.0,  # Optional override for default smoothing sigma
+        'smoothing_sigma': 1.0,  # Optional override for default smoothing sigma
     },
 ]
 
@@ -146,6 +113,59 @@ def load_h5_file(year, month, day, sequence, iteration, repetition, bec2_path):
     )
     
     return h5_path
+
+
+def load_dmd_profile_from_txt(txt_path):
+    """
+    Load the DMD profile from a text file.
+    
+    Expected format: two columns (x_um, profile_y), tab or space delimited.
+    Lines starting with # are treated as comments.
+    Optional header row with column names (will be auto-detected and skipped).
+    
+    Returns (x_um, profile_y) or (None, None) if file not found/invalid.
+    """
+    try:
+        # Check if path is relative to DMD folder
+        if not os.path.isabs(txt_path):
+            dmd_folder = os.path.dirname(__file__)
+            txt_path = os.path.join(dmd_folder, txt_path)
+        
+        if not os.path.exists(txt_path):
+            print(f"Error: Profile file not found: {txt_path}")
+            return None, None
+        
+        # Try to load with skiprows=1 in case there's a header
+        try:
+            data = np.loadtxt(txt_path, comments='#')
+        except ValueError as e:
+            # If we get a conversion error, try skipping the first row (header)
+            if "could not convert string" in str(e):
+                print("  Detected header row, skipping it...")
+                data = np.loadtxt(txt_path, comments='#', skiprows=1)
+            else:
+                raise
+        
+        if data.ndim != 2 or data.shape[1] != 2:
+            print(f"Error: Expected 2 columns in {txt_path}, got shape {data.shape}")
+            return None, None
+        
+        x_um = data[:, 0]
+        profile_y = data[:, 1]
+        
+        print(f"Loaded DMD profile from txt file: {len(x_um)} points")
+        print(f"  File: {txt_path}")
+        print(f"  x range: {x_um.min():.2f} to {x_um.max():.2f} um")
+        print(f"  profile range: {profile_y.min():.4f} to {profile_y.max():.4f}")
+        
+        return x_um, profile_y
+        
+    except Exception as e:
+        print(f"Error loading DMD profile from txt file: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    return None, None
 
 
 def load_dmd_profile_from_h5(h5_path):
@@ -371,24 +391,34 @@ def main():
     print("="*70)
     
     # -------------------------------------------------------------------------
-    # 1) Find and load the previous shot's h5 file
+    # 1) Load the initial DMD profile (from h5 or txt file)
     # -------------------------------------------------------------------------
-    print(f"\nSearching for shot: year={YEAR}, month={MONTH}, day={DAY}, sequence={SEQUENCE}, it={ITERATION}, rep={REPETITION}")
-    
-    h5_path = load_h5_file(YEAR, MONTH, DAY, SEQUENCE, ITERATION, REPETITION, settings_mod.bec2path)
-    
-    if h5_path is None:
-        print(f"ERROR: Could not find h5 file for specified shot.")
-        return
-    
-    print(f"Found h5 file: {h5_path}")
-    
-    # Load DMD profile from h5 file
-    x_dmd, old_profile = load_dmd_profile_from_h5(h5_path)
-    
-    if x_dmd is None:
-        print("ERROR: Could not load DMD profile from h5 file.")
-        return
+    if USE_H5_PROFILE:
+        print(f"\nSearching for shot: year={YEAR}, month={MONTH}, day={DAY}, sequence={SEQUENCE}, it={ITERATION}, rep={REPETITION}")
+        
+        h5_path = load_h5_file(YEAR, MONTH, DAY, SEQUENCE, ITERATION, REPETITION, settings_mod.bec2path)
+        
+        if h5_path is None:
+            print(f"ERROR: Could not find h5 file for specified shot.")
+            return
+        
+        print(f"Found h5 file: {h5_path}")
+        
+        # Load DMD profile from h5 file
+        x_dmd, old_profile = load_dmd_profile_from_h5(h5_path)
+        
+        if x_dmd is None:
+            print("ERROR: Could not load DMD profile from h5 file.")
+            return
+    else:
+        print(f"\nLoading initial DMD profile from txt file: {PROFILE_TXT_FILE}")
+        
+        # Load DMD profile from txt file
+        x_dmd, old_profile = load_dmd_profile_from_txt(PROFILE_TXT_FILE)
+        
+        if x_dmd is None:
+            print("ERROR: Could not load DMD profile from txt file.")
+            return
     
     error_profile_specs = get_error_profile_specs()
 

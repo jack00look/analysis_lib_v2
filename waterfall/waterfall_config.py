@@ -8,9 +8,8 @@ ACTIVE_MODE = 'ARP_Backward'  # <-- Set your active mode here. Available: 'ARP_F
 # results/kz_param_stability_safe_box_*.json.
 RECOMMENDED_CENTER = False
 
-SEQS = [3,4,5,6,7]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
-#SEQS=[33,34,35,36,37,38]
-#47,48,49,50,51,52
+SEQS = [37]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
+
 # -------------------------
 # HDF Data Configuration
 # -------------------------
@@ -18,28 +17,108 @@ HDF_CONFIG = {
     'today': True,  # Set to False to load HDF from a previous day
     'year': 2026,   # Set if today=False (e.g., 2026)
     'month': 3,  # Set if today=False (e.g., 3 for March)
-    'day': 24,    # Set if today=False (e.g., 17)
+    'day': 20,    # Set if today=False (e.g., 17)
 }
 
 # -------------------------
 # Shared numeric parameters
 # -------------------------
 PARAMS = {
-    # Camera used to convert x axis from pixels to microns using camera_settings.cameras[CAMERA_NAME]['px_size']
-    'CAMERA_NAME': 'cam_vert1',
     'SIGMA_Z_LOCAL_AVG': 3,
     'SIGMA_Z_LOCAL_FLUCT': 2,
-    'AUTOCORR_CENTER': 1085,
-    'AUTOCORR_WINDOW': 20,
     # Integration window limits are in micrometers (um)
-    'X_MIN_INTEGRATION': 905,
-    'X_MAX_INTEGRATION': 1205,
+    'X_MIN_INTEGRATION': 900,
+    'X_MAX_INTEGRATION': 1200,
     'NUM_SECTIONS': 300,
-    'BACK_CHECK_THRESHOLD': 0.05,
-    'NTOT_CHECK_THRESHOLD': 7e5,
     # Set to None for autoscale
-    'WATERFALL_MAG_CLIM': (-.2, .4),
+    'WATERFALL_MAG_CLIM': (-.1, .8),
     'WATERFALL_DENSITY_CLIM': None,
+}
+
+# -------------------------
+# Shot quality filtering (bad-shot rejection)
+# -------------------------
+# All thresholds are applied on the show_ODs metrics:
+#   *_cnt_rel_atoms_back, *_cnt_rel_probe_back,
+#   *_cnt_rel_atoms_sat,  *_cnt_rel_probe_sat,
+#   *_probe_norm_err,     *_N_atoms
+SHOT_FILTER_CONFIG = {
+    'enabled': True,
+    'apply_back_check': True,
+    'apply_sat_check': True,
+    'apply_probe_norm_err_check': True,
+    'back_threshold': 0.001,
+    'sat_threshold': 1.,
+    'probe_norm_err_threshold': 0.1,
+    # Used only when modality enables Ntot filtering
+    'ntot_threshold': 7e5,
+}
+
+# -------------------------
+# Magnetization extraction modalities
+# -------------------------
+MAGNETIZATION_MODALITIES = {
+    # Modality 1: standard two-component magnetization from cam_vert1.
+    # Uses m1/m2 1D profiles and applies affine correction coefficients.
+    'vert1_two_component': {
+        'camera_name': 'cam_vert1',
+        'type': 'two_component',
+        'data_origin': 'show_ODs',
+        'atoms_images': ['PTAI_m1', 'PTAI_m2'],
+        'apply_ntot_check': True,
+        # Optional affine recomputation of line densities:
+        # n1D_m1' = a1*n1D_m1 + b1*n1D_m2 + c1
+        # n1D_m2' = a2*n1D_m2 + b2*n1D_m1 + c2
+        'affine_correction': {
+            'a1': 1.,#1.43/1.07,
+            'b1': 0.0,
+            'c1': 0.,#-0.3E8*1.43/1.07,#-0.47e8,
+            'a2': 1.,#0.65/0.38,
+            'b2': 0.0,
+            'c2': 0.,#-0.7E8,#-0.76e8*0.65/0.38,
+        },
+        # Optional explicit labels (if None, library auto-detects columns)
+        'm1_column': None,
+        'm2_column': None,
+    },
+    # Modality 2: PHC multiple magnetization profiles from cam_vert2_PHC.
+    # All atoms_images correspond to the same state basis; multiple images mean
+    # multiple magnetization profiles (no mF weights are applied).
+    'vert2_phc_multicomponent': {
+        'camera_name': 'cam_vert2_PHC',
+        'type': 'phc_profiles',
+        'data_origin': 'show_ODs',
+        'atoms_images': ['PHC_1', 'PHC_2', 'PHC_3', 'PHC_4'],
+        'apply_ntot_check': False,
+    },
+}
+
+# -------------------------
+# Global defect-finding algorithm parameters
+# -------------------------
+DEFECT_ANALYSIS_PARAMS = {
+    # 1) Signal preprocessing
+    'gaussian_sigma': 0.3,                 # Gaussian smoothing sigma (pixels)
+
+    # 2) Peak detection on dM/dx
+    'derivative_threshold': 0.0,           # Backward-compatible base magnitude
+    'derivative_threshold_pos': 0.1,       # +dM/dx threshold for positive peaks
+    'derivative_threshold_neg': -0.1,      # -dM/dx threshold for negative peaks
+
+    # 3) Post-threshold peak quality filter (on magnetization step)
+    # Require |mean(m right N px) - mean(m left N px)| >= min_abs_delta_m
+    # Rejected peaks are marked with black crosses and not counted.
+    'peak_step_filter_enabled': True,
+    'peak_step_filter_window_px': 4,
+    'peak_step_filter_min_abs_delta_m': 0.3,
+
+    # 4) Geometric cleanup and correction
+    'min_same_sign_peak_distance_um': 7.0,  # merge same-sign peaks closer than this
+    'zero_crossing_min_distance_um': 3.0,   # min distance from kept threshold peaks for corrected defects
+
+    # 5) Histogram control
+    'defect_position_hist_half_window_um': 4.0,  # counts within ±window around 1-um centers
+    'defect_size_hist_bin_size': 5.,  # 'sqrt', 'fd', 'sturges', int, or float for bin width
 }
 
 # -------------------------
@@ -47,13 +126,14 @@ PARAMS = {
 # -------------------------
 DEFAULT_PLOTS = {
     'main_waterfall': True,
-    'fluctuations_waterfall': True,
+    'fluctuations_waterfall': False,
     'sectioned_sigmoid': True,
     'avg_density_profile': False,
     'avg_magnetization_profile': True,
     'corr_sigmoid_density': False,
-    'corr_mag_density': True,
+    'corr_mag_density': False,
     'evolution_plots': False,
+    'used_region_density_fluctuations': True,
 }
 
 
@@ -62,6 +142,7 @@ MODE_CONFIGS = {
         'scan': 'ARP_Forward',
         'seqs': [18,19, 20, 22],
         'data_origin': 'show_ODs',
+        'magnetization_modality': 'vert1_two_component',
         'constraints': None,
         'average': True,
         'plots': {**DEFAULT_PLOTS},
@@ -75,6 +156,7 @@ MODE_CONFIGS = {
         'scan': 'ARPF_feedback',
         'seqs': [22],
         'data_origin': 'show_ODs',
+        'magnetization_modality': 'vert1_two_component',
         'constraints': None,
         'average': False,
         'plots': {**DEFAULT_PLOTS},
@@ -89,6 +171,7 @@ MODE_CONFIGS = {
         'scan': 'ARP_Backward',
         'seqs': [48],
         'data_origin': 'show_ODs',
+        'magnetization_modality': 'vert1_two_component',
         'constraints': None,
         'average': True,
         'plots': {**DEFAULT_PLOTS},
@@ -102,8 +185,9 @@ MODE_CONFIGS = {
         'scan': 'KZ_det_scan',
         'seqs': [17, 18, 19],
         'data_origin': 'show_ODs',
+        'magnetization_modality': 'vert1_two_component',
         'constraints': None,
-        'average': True,
+        'average': False,
         'plots': {
             **DEFAULT_PLOTS,
             'fluctuations_waterfall': False,
@@ -118,6 +202,7 @@ MODE_CONFIGS = {
         'scan': 'ARP_KZ_reps',
         'seqs': [50],
         'data_origin': 'show_ODs',
+        'magnetization_modality': 'vert1_two_component',
         'constraints': {'ARPKZ_final_set_field': 130.429},
         'average': False,
         'plots': {
@@ -131,6 +216,7 @@ MODE_CONFIGS = {
         'scan': 'ARPF_reps',
         'seqs': [23],
         'data_origin': 'show_ODs',
+        'magnetization_modality': 'vert1_two_component',
         'constraints': None,
         'average': False,
         'plots': {
@@ -148,21 +234,33 @@ MODE_CONFIGS = {
         'scan': 'DMD_density_feedback',
         'seqs': [26],
         'data_origin': 'show_ODs',
+        'magnetization_modality': 'vert1_two_component',
         'constraints': None,
         'average': False,
         'plots': {
             **DEFAULT_PLOTS,
+            'main_waterfall': False,
             'sectioned_sigmoid': False,
             'corr_sigmoid_density': False,
+            'used_region_density_fluctuations': True,
         },
         'globals_in_title': [],
+        # Optional: Set to filter shots by name (e.g., 'Do_BEC_DMD_feedback')
+        'shot_name_filter': None,
+        # Optional: Custom y-axis label for density fluctuations plot (default uses scan variable)
+        'density_fluct_y_label': None,
+        # Optional: Override the scan variable column (e.g., use 'run repeat' instead of default)
+        'scan_variable_override': 'rep',
+        # Skip feedback filtering if only using density fluctuations plot
+        'skip_feedback_filter': True,
     },
     'bubbles': {
         'scan': 'bubbles',
         'seqs': [1],
         'data_origin': 'show_ODs',
+        'magnetization_modality': 'vert1_two_component',
         'constraints': None,
-        'average': True,
+        'average': False,
         'plots': {
             **DEFAULT_PLOTS,
             'sectioned_sigmoid': False,
@@ -175,6 +273,7 @@ MODE_CONFIGS = {
         'scan': 'bubbles_evolution',
         'seqs': [1],
         'data_origin': 'show_ODs',
+        'magnetization_modality': 'vert1_two_component',
         'constraints': None,
         'average': True,
         'plots': {
@@ -187,9 +286,10 @@ MODE_CONFIGS = {
     },
     'bubbles_repeat': {
         'scan': 'bubbles_repeat',
-        'seqs': [1],
+        'seqs': [1.5],
         'data_origin': 'show_ODs',
-        'constraints': {'bubbles_time': [10]},
+        'magnetization_modality': 'vert1_two_component',
+        'constraints': {'bubbles_time': [1.5]},
         'average': False,
         'plots': {
             **DEFAULT_PLOTS,
@@ -208,32 +308,10 @@ MODE_CONFIGS = {
         'scan': 'KZ_defect_analysis',
         'seqs': [],  # Set your sequence indices
         'data_origin': 'show_ODs',
-        'defect_analysis': {
-            # 1) Signal preprocessing
-            'gaussian_sigma': 0.3,                 # Gaussian smoothing sigma (pixels)
-
-            # 2) Peak detection on dM/dx
-            'derivative_threshold': 0.0,           # Backward-compatible base magnitude
-            'derivative_threshold_pos': 0.055,     # +dM/dx threshold for positive peaks
-            'derivative_threshold_neg': -0.035,    # -dM/dx threshold for negative peaks
-
-            # 3) Post-threshold peak quality filter (on magnetization step)
-            # Require |mean(m right N px) - mean(m left N px)| >= min_abs_delta_m
-            # Rejected peaks are marked with black crosses and not counted.
-            'peak_step_filter_enabled': True,
-            'peak_step_filter_window_px': 4,
-            'peak_step_filter_min_abs_delta_m': 0.1,
-
-            # 4) Geometric cleanup and correction
-            'min_same_sign_peak_distance_um': 7.0,  # merge same-sign peaks closer than this
-            'zero_crossing_min_distance_um': 3.0,   # min distance from kept threshold peaks for corrected defects
-
-            # 5) Histogram control
-            'defect_position_hist_half_window_um': 4.0,  # counts within ±window around 1-um centers
-        },
+        'magnetization_modality': 'vert1_two_component',
         'constraints': {
             'ARPKZ_final_set_field': 130.395,  # Set to desired value (e.g., 130.429)
-            'ARPKZ_omega_ramp_time': 4.,  # Set to desired value
+            'ARPKZ_omega_ramp_time': 32.,  # Set to desired value
             'ARPKZ_waiting_time': 10.,  # Set to desired value
         },
         'average': False,

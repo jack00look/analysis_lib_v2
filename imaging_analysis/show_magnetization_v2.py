@@ -17,7 +17,7 @@ AC_REGION_END = 1170
 G2_PRE_FILTER_SIGMA = 2.0
 
 # Dynamic Y-ROI parameters
-Y_ROI_HALF_WIDTH = 30
+Y_ROI_HALF_WIDTH = 50
 Z1D_SMOOTH_SIGMA = 10
 DOMAIN_THRESHOLD = 0.04
 ROI_LINE_WIDTH = 2.0
@@ -589,11 +589,11 @@ def plot_magnetization(images_ODlog, img_m1, img_m2, Z, D, y_roi, title, show=Tr
     
     # Plot m1
     # Note: aspect='auto' fixes the "locking" issue when zooming with shared axes
-    ax[0].imshow(images_ODlog['PTAI_m1'], vmin=0, vmax=1.5, cmap='gist_stern', aspect='auto')
+    ax[0].imshow(images_ODlog['PTAI_m1'], vmin=0, vmax=1.5e14, cmap='gist_stern', aspect='auto')
     ax[0].set_title('m1')
     
     # Plot m2
-    ax[1].imshow(images_ODlog['PTAI_m2'], vmin=0, vmax=1.5, cmap='gist_stern', aspect='auto')
+    ax[1].imshow(images_ODlog['PTAI_m2'], vmin=0, vmax=1.5e14, cmap='gist_stern', aspect='auto')
     ax[1].set_title('m2')
     
     # Plot Z
@@ -604,7 +604,7 @@ def plot_magnetization(images_ODlog, img_m1, img_m2, Z, D, y_roi, title, show=Tr
     # Plot D (m1 + m2)
     # Using ODlog sum for visualization as in original code
     d_visual = images_ODlog['PTAI_m1'] + images_ODlog['PTAI_m2']
-    ax[3].imshow(d_visual, vmin=0, vmax=1.5, cmap='gist_stern', aspect='auto')
+    ax[3].imshow(d_visual, vmin=0, vmax=1.5e14, cmap='gist_stern', aspect='auto')
     ax[3].set_title('m1 + m2 (OD)')
     
     # Add vertical lines for ROI limits to all plots

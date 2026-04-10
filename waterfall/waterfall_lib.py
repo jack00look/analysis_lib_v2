@@ -6,18 +6,11 @@ import os
 from matplotlib.collections import PolyCollection
 from scipy.ndimage import gaussian_filter1d
 from scipy.interpolate import interp1d
+import defect_finding_lib as defect_lib
 
 
-def autocorr(x):
-    result = np.correlate(x, x, mode='full')
-    c = result[result.size // 2]
-    if c == 0:
-        return np.zeros_like(result[result.size // 2:])
-    return result[result.size // 2:] / c
-
-
-def get_um_per_px(params):
-    camera_name = params.get('CAMERA_NAME', 'cam_vert1')
+def get_um_per_px(params, camera_name_override=None):
+    camera_name = camera_name_override if camera_name_override is not None else 'cam_vert1'
     default_um_per_px = 1.0
 
     try:
@@ -129,7 +122,7 @@ def _build_globals_title_lines(df, globals_in_title):
     return lines
 
 
-def filter_dataframe(df, seqs, constraints=None):
+def filter_dataframe(df, seqs, constraints=None, shot_name_filter=None):
     out = df[df['sequence_index'].isin(seqs)]
     print(f"Initial shots in sequences {seqs}: {len(out)}")
     if constraints is not None:
@@ -145,6 +138,21 @@ def filter_dataframe(df, seqs, constraints=None):
             after = len(out)
             rejected = before - after
             print(f"  Constraint {key}={value}: {rejected} rejected, {after} remaining")
+    
+    # Filter by shot name if provided
+    if shot_name_filter is not None:
+        before = len(out)
+        try:
+            # Check if 'name' column exists
+            if 'name' in out.columns:
+                out = out[out['name'].str.contains(shot_name_filter, na=False)]
+                after = len(out)
+                rejected = before - after
+                print(f"  Shot name filter '{shot_name_filter}': {rejected} rejected, {after} remaining")
+            else:
+                print(f"  Warning: 'name' column not found for shot name filtering. Available columns: {list(out.columns)}")
+        except Exception as e:
+            print(f"  Warning: Error applying shot name filter: {e}")
     
     # Add a unique shot counter for plotting all shots
     out = out.copy()
@@ -195,87 +203,214 @@ def filter_valid_feedback_shots(df):
     return df[mask]
 
 
-def get_valid_rows_mask(df, back_threshold, ntot_threshold):
-    n = len(df)
+def _load_camera_settings_module():
+    camera_settings_path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        'imaging_analysis_lib',
+        'camera_settings.py',
+    )
+    spec = importlib.util.spec_from_file_location('imaging_analysis_lib.camera_settings', camera_settings_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f'Unable to load module spec from {camera_settings_path}')
+    camera_settings = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(camera_settings)
+    return camera_settings
 
-    # Try to get background and N_atoms columns - they may not exist or have different names
-    # Try multiple possible column names
-    back_m1_candidates = [
-        ('show_ODs', 'PTAI_m1_cnt_rel_atoms_back'),
-        ('show_ODs', 'PTAI_m1_SVD_cnt_rel_atoms_back'),
-    ]
-    back_m1 = None
-    for col in back_m1_candidates:
-        if col in df.columns:
-            temp = df[col].values
-            if not np.all(np.isnan(temp)):
-                back_m1 = temp
-                break
-    if back_m1 is None or np.all(np.isnan(back_m1)):
-        back_m1 = np.zeros(n)
-    
-    # Check if m2 data exists (not present in DMD density feedback)
-    has_m2 = ('show_ODs', 'PTAI_m2_cnt_rel_atoms_back') in df.columns
-    if has_m2:
-        try:
-            back_m2 = df[('show_ODs', 'PTAI_m2_cnt_rel_atoms_back')].values
-            # Replace NaN with zeros (DMD feedback has m2 columns but they're all NaN)
-            back_m2 = np.nan_to_num(back_m2, nan=0.0)
-        except (KeyError, TypeError):
-            back_m2 = np.zeros(n)
-    else:
-        back_m2 = np.zeros(n)
-    
-    back_probe = back_m1  # Use same as m1
-    
-    n_m1_candidates = [
-        ('show_ODs', 'PTAI_m1_N_atoms'),
-        ('show_ODs', 'PTAI_m1_SVD_N_atoms'),
-    ]
-    n_m1 = None
-    for col in n_m1_candidates:
-        if col in df.columns:
-            temp = df[col].values
-            if not np.all(np.isnan(temp)):
-                n_m1 = temp
-                break
-    if n_m1 is None or np.all(np.isnan(n_m1)):
-        n_m1 = np.ones(n) * 1e6  # Set to large value so ntot check passes
-    
-    if has_m2:
-        try:
-            n_m2 = df[('show_ODs', 'PTAI_m2_N_atoms')].values
-            # Replace NaN with zeros (DMD feedback has m2 columns but they're all NaN)
-            n_m2 = np.nan_to_num(n_m2, nan=0.0)
-        except (KeyError, TypeError):
-            n_m2 = np.zeros(n)
-    else:
-        n_m2 = np.zeros(n)
 
-    # Calculate max background and total N for each shot
-    back_max = np.maximum(np.maximum(back_m1, back_m2), back_probe)
-    n_tot = n_m1 + n_m2
+def _legacy_1d_key_from_atom(atom_name):
+    if isinstance(atom_name, str) and '_' in atom_name:
+        prefix, rest = atom_name.split('_', 1)
+        if prefix in ('PTAI', 'PHC'):
+            return f'{rest}_1d'
+    return f'{atom_name}_1d'
 
-    good = np.zeros(n, dtype=bool)
-    reject_reasons = {'background': 0, 'ntot': 0, 'exception': 0}
-    
-    for i in range(n):
+
+def _first_valid_profile_column(df, candidates):
+    for col in candidates:
+        if col not in df.columns:
+            continue
+        vals = df[col].values
+        if len(vals) == 0:
+            continue
+        # Look for first valid array, not just the first value
+        for first in vals:
+            if hasattr(first, 'shape') and len(getattr(first, 'shape', ())) > 0:
+                return col
+    return None
+
+
+def _resolve_modality(mode_cfg, params):
+    default_modality_name = mode_cfg.get('magnetization_modality', 'vert1_two_component')
+    modality_map = mode_cfg.get('magnetization_modalities', {}) if isinstance(mode_cfg, dict) else {}
+    modality_cfg = dict(modality_map.get(default_modality_name, {})) if hasattr(modality_map, 'get') else {}
+
+    if len(modality_cfg) == 0:
+        if default_modality_name == 'vert2_phc_multicomponent':
+            modality_cfg = {
+                'camera_name': 'cam_vert2_PHC',
+                'type': 'phc_profiles',
+                'data_origin': mode_cfg.get('data_origin', 'show_ODs'),
+                'atoms_images': ['PHC_1', 'PHC_2', 'PHC_3', 'PHC_4'],
+                'apply_ntot_check': False,
+            }
+        else:
+            modality_cfg = {
+                'camera_name': 'cam_vert1',
+                'type': 'two_component',
+                'data_origin': mode_cfg.get('data_origin', 'show_ODs'),
+                'atoms_images': ['PTAI_m1', 'PTAI_m2'],
+                'apply_ntot_check': True,
+            }
+
+    if 'camera_name' not in modality_cfg:
+        modality_cfg['camera_name'] = 'cam_vert1'
+    if 'data_origin' not in modality_cfg:
+        modality_cfg['data_origin'] = mode_cfg.get('data_origin', 'show_ODs')
+    if 'apply_ntot_check' not in modality_cfg:
+        modality_cfg['apply_ntot_check'] = bool(modality_cfg.get('type', 'two_component') == 'two_component')
+
+    # Auto-populate atoms_images from camera settings if not explicitly provided.
+    if 'atoms_images' not in modality_cfg or not modality_cfg.get('atoms_images'):
         try:
-            back_ok = (back_m1[i] < back_threshold) and (back_m2[i] < back_threshold) and (back_probe[i] < back_threshold)
-            ntot_ok = (n_m1[i] + n_m2[i]) > ntot_threshold
-            good[i] = back_ok and ntot_ok
-            
-            if not good[i]:
-                if not back_ok:
-                    reject_reasons['background'] += 1
-                if not ntot_ok:
-                    reject_reasons['ntot'] += 1
+            camera_settings = _load_camera_settings_module()
+            modality_cfg['atoms_images'] = list(camera_settings.cameras[modality_cfg['camera_name']]['atoms_images'])
         except Exception:
-            good[i] = False
-            reject_reasons['exception'] += 1
-    
-    n_valid = np.count_nonzero(good)
-    
+            modality_cfg['atoms_images'] = ['PTAI_m1', 'PTAI_m2']
+
+    return modality_cfg
+
+
+def get_valid_rows_mask(df, filter_cfg=None, modality_cfg=None, data_origin='show_ODs'):
+    n = len(df)
+    if n == 0:
+        return np.array([], dtype=bool)
+
+    # Backward compatibility: old signature get_valid_rows_mask(df, back_threshold, ntot_threshold)
+    if isinstance(filter_cfg, (int, float, np.integer, np.floating)):
+        back_thr = float(filter_cfg)
+        ntot_thr = float(modality_cfg if isinstance(modality_cfg, (int, float, np.integer, np.floating)) else 7e5)
+        filter_cfg = {
+            'enabled': True,
+            'apply_back_check': True,
+            'apply_sat_check': False,
+            'apply_probe_norm_err_check': False,
+            'back_threshold': back_thr,
+            'ntot_threshold': ntot_thr,
+        }
+        modality_cfg = {'atoms_images': ['PTAI_m1', 'PTAI_m2'], 'apply_ntot_check': True}
+
+    if filter_cfg is None:
+        filter_cfg = {
+            'enabled': True,
+            'apply_back_check': True,
+            'apply_sat_check': False,
+            'apply_probe_norm_err_check': False,
+            'back_threshold': 0.05,
+            'sat_threshold': 0.001,
+            'probe_norm_err_threshold': 1.0,
+            'ntot_threshold': 7e5,
+        }
+    if modality_cfg is None:
+        modality_cfg = {'atoms_images': ['PTAI_m1', 'PTAI_m2'], 'apply_ntot_check': True}
+
+    if not bool(filter_cfg.get('enabled', True)):
+        return np.ones(n, dtype=bool)
+
+    atoms = list(modality_cfg.get('atoms_images', []))
+    if len(atoms) == 0:
+        atoms = ['PTAI_m1', 'PTAI_m2']
+
+    def _collect_max_metric(suffix):
+        cols = []
+        for atom in atoms:
+            cols.extend([
+                (data_origin, f'{atom}_{suffix}'),
+                (data_origin, f'{atom}_SVD_{suffix}'),
+            ])
+
+        arrays = []
+        for col in cols:
+            if col not in df.columns:
+                continue
+            try:
+                arr = np.asarray(df[col].values, dtype=float)
+            except Exception:
+                continue
+            arrays.append(np.nan_to_num(arr, nan=-np.inf))
+
+        if len(arrays) == 0:
+            return None
+        return np.max(np.vstack(arrays), axis=0)
+
+    def _collect_sum_metric(suffix):
+        vals = np.zeros(n, dtype=float)
+        found = False
+        for atom in atoms:
+            candidates = [
+                (data_origin, f'{atom}_{suffix}'),
+                (data_origin, f'{atom}_SVD_{suffix}'),
+            ]
+            arr_atom = None
+            for col in candidates:
+                if col not in df.columns:
+                    continue
+                try:
+                    arr_atom = np.asarray(df[col].values, dtype=float)
+                    break
+                except Exception:
+                    continue
+            if arr_atom is not None:
+                found = True
+                vals += np.nan_to_num(arr_atom, nan=0.0)
+        return vals if found else None
+
+    back_atoms = _collect_max_metric('cnt_rel_atoms_back')
+    back_probe = _collect_max_metric('cnt_rel_probe_back')
+    sat_atoms = _collect_max_metric('cnt_rel_atoms_sat')
+    sat_probe = _collect_max_metric('cnt_rel_probe_sat')
+    probe_norm = _collect_max_metric('probe_norm_err')
+    n_tot = _collect_sum_metric('N_atoms')
+
+    good = np.ones(n, dtype=bool)
+    reject_reasons = {'background': 0, 'saturation': 0, 'probe_norm': 0, 'ntot': 0}
+
+    if bool(filter_cfg.get('apply_back_check', True)):
+        thr = float(filter_cfg.get('back_threshold', 0.05))
+        back_atoms_ok = np.ones(n, dtype=bool) if back_atoms is None else (back_atoms < thr)
+        back_probe_ok = np.ones(n, dtype=bool) if back_probe is None else (back_probe < thr)
+        back_ok = back_atoms_ok & back_probe_ok
+        reject_reasons['background'] = int(np.count_nonzero(~back_ok))
+        good &= back_ok
+
+    if bool(filter_cfg.get('apply_sat_check', False)):
+        thr = float(filter_cfg.get('sat_threshold', 0.001))
+        sat_atoms_ok = np.ones(n, dtype=bool) if sat_atoms is None else (sat_atoms < thr)
+        sat_probe_ok = np.ones(n, dtype=bool) if sat_probe is None else (sat_probe < thr)
+        sat_ok = sat_atoms_ok & sat_probe_ok
+        reject_reasons['saturation'] = int(np.count_nonzero(~sat_ok))
+        good &= sat_ok
+
+    if bool(filter_cfg.get('apply_probe_norm_err_check', False)):
+        thr = float(filter_cfg.get('probe_norm_err_threshold', 1.0))
+        probe_norm_ok = np.ones(n, dtype=bool) if probe_norm is None else (probe_norm < thr)
+        reject_reasons['probe_norm'] = int(np.count_nonzero(~probe_norm_ok))
+        good &= probe_norm_ok
+
+    if bool(modality_cfg.get('apply_ntot_check', True)):
+        thr = float(filter_cfg.get('ntot_threshold', 7e5))
+        n_tot_ok = np.ones(n, dtype=bool) if n_tot is None else (n_tot > thr)
+        reject_reasons['ntot'] = int(np.count_nonzero(~n_tot_ok))
+        good &= n_tot_ok
+
+    print(
+        'Shot quality filter summary: '
+        f"keep={np.count_nonzero(good)}/{n}, "
+        f"reject_background={reject_reasons['background']}, "
+        f"reject_saturation={reject_reasons['saturation']}, "
+        f"reject_probe_norm={reject_reasons['probe_norm']}, "
+        f"reject_ntot={reject_reasons['ntot']}"
+    )
+
     return good
 
 
@@ -327,7 +462,154 @@ def unpack_images(df, m1_lbl, m2_lbl):
     return m1, m2, dim
 
 
-def process_magnetization(m1, m2, sigma_avg, sigma_fluct, autocorr_center, autocorr_window):
+def _load_profile_matrix(df, data_origin, atom_name, explicit_col=None):
+    candidates = []
+    if explicit_col is not None:
+        candidates.append(explicit_col)
+
+    legacy_1d = _legacy_1d_key_from_atom(atom_name)
+    candidates.extend([
+        (data_origin, f'{atom_name}_n1D_x'),
+        (data_origin, f'{atom_name}_SVD_n1D_x'),
+        (data_origin, legacy_1d),
+    ])
+
+    col = _first_valid_profile_column(df, candidates)
+    if col is None:
+        return None, None
+
+    raw = df[col].values
+    if len(raw) == 0:
+        return None, None
+
+    # Find first valid array (skip NaN scalars or invalid data)
+    dim = None
+    for val in raw:
+        try:
+            if isinstance(val, np.ndarray) and len(val) > 0:
+                dim = int(val.shape[0])
+                break
+        except Exception:
+            continue
+    
+    if dim is None:
+        return None, None
+
+    arr = np.zeros((len(raw), dim), dtype=float)
+    for i in range(len(raw)):
+        try:
+            arr[i] = np.asarray(raw[i], dtype=float)
+        except Exception:
+            pass
+    return arr, col
+
+
+def build_magnetization_inputs(sorted_df, mode_cfg, params, data_origin):
+    modality_cfg = _resolve_modality(mode_cfg, params)
+    modality_type = str(modality_cfg.get('type', 'two_component')).strip().lower()
+
+    if modality_type in ('multi_component', 'phc_profiles'):
+        atoms = list(modality_cfg.get('atoms_images', []))
+        mag_profiles = {}
+        dim = None
+
+        for atom in atoms:
+            arr, col_used = _load_profile_matrix(sorted_df, data_origin, atom)
+            if arr is None:
+                continue
+            if dim is None:
+                dim = arr.shape[1]
+            if arr.shape[1] != dim:
+                continue
+            mag_profiles[atom] = np.asarray(arr, dtype=float)
+
+        if len(mag_profiles) == 0:
+            return None
+
+        # Keep all PHC magnetization profiles available for downstream analysis.
+        # Until a dedicated downstream consumer is defined, use their mean as the
+        # representative profile for existing waterfall plots.
+        profile_names = list(mag_profiles.keys())
+        profile_stack = np.stack([mag_profiles[name] for name in profile_names], axis=0)
+        M = np.mean(profile_stack, axis=0)
+        D = np.ones_like(M)
+
+        n_shots = M.shape[0]
+        profiles_per_shot = []
+        for i in range(n_shots):
+            shot_dict = {name: np.asarray(mag_profiles[name][i], dtype=float) for name in profile_names}
+            profiles_per_shot.append(shot_dict)
+
+        M_full, D_full, z_fluc_full = process_profiles(
+            M,
+            D,
+            params['SIGMA_Z_LOCAL_AVG'],
+            params['SIGMA_Z_LOCAL_FLUCT'],
+        )
+        return {
+            'M_full': M_full,
+            'D_full': D_full,
+            'z_fluc_full': z_fluc_full,
+            'img_dims': M_full.shape[1],
+            'modality_cfg': modality_cfg,
+            'magnetization_profiles': mag_profiles,
+            'magnetization_profile_names': profile_names,
+            'magnetization_profiles_per_shot': profiles_per_shot,
+        }
+
+    # Default: two-component mode
+    m1_col = modality_cfg.get('m1_column', None)
+    m2_col = modality_cfg.get('m2_column', None)
+
+    m1_arr, m1_col_used = _load_profile_matrix(sorted_df, data_origin, 'PTAI_m1', explicit_col=m1_col)
+    m2_arr, m2_col_used = _load_profile_matrix(sorted_df, data_origin, 'PTAI_m2', explicit_col=m2_col)
+
+    if m1_arr is None:
+        # Fallback to legacy columns
+        m1_lbl = (data_origin, 'm1_1d')
+        m2_lbl = (data_origin, 'm2_1d')
+        m1_arr, m2_arr, _ = unpack_images(sorted_df, m1_lbl, m2_lbl)
+        m1_col_used = m1_lbl
+        m2_col_used = m2_lbl
+        if m1_arr is None:
+            return None
+
+    if m2_arr is None:
+        m2_arr = np.zeros_like(m1_arr)
+
+    # Optional affine recomputation of n1D profiles for two-component modality only
+    affine_cfg = modality_cfg.get('affine_correction', {})
+    a1 = float(affine_cfg.get('a1', 1.0))
+    b1 = float(affine_cfg.get('b1', 0.0))
+    c1 = float(affine_cfg.get('c1', 0.0))
+    a2 = float(affine_cfg.get('a2', 1.0))
+    b2 = float(affine_cfg.get('b2', 0.0))
+    c2 = float(affine_cfg.get('c2', 0.0))
+
+    if (a1, b1, c1, a2, b2, c2) != (1.0, 0.0, 0.0, 1.0, 0.0, 0.0):
+        m1_src = np.asarray(m1_arr, dtype=float)
+        m2_src = np.asarray(m2_arr, dtype=float)
+        m1_arr = a1 * m1_src + b1 * m2_src + c1
+        m2_arr = a2 * m2_src + b2 * m1_src + c2
+
+    M_full, D_full, z_fluc_full = process_magnetization(
+        m1_arr,
+        m2_arr,
+        params['SIGMA_Z_LOCAL_AVG'],
+        params['SIGMA_Z_LOCAL_FLUCT'],
+    )
+    return {
+        'M_full': M_full,
+        'D_full': D_full,
+        'z_fluc_full': z_fluc_full,
+        'img_dims': M_full.shape[1],
+        'modality_cfg': modality_cfg,
+        'm1_col_used': m1_col_used,
+        'm2_col_used': m2_col_used,
+    }
+
+
+def process_magnetization(m1, m2, sigma_avg, sigma_fluct):
     m1 = np.clip(m1, 0, None)
     m2 = np.clip(m2, 0, None)
     d = m1 + m2
@@ -335,19 +617,20 @@ def process_magnetization(m1, m2, sigma_avg, sigma_fluct, autocorr_center, autoc
         m = (m2 - m1) / d
     m = np.nan_to_num(np.clip(m, -1, 1), nan=0.0)
 
+    return process_profiles(m, d, sigma_avg, sigma_fluct)
+
+
+def process_profiles(m, d, sigma_avg, sigma_fluct):
+    m = np.asarray(m, dtype=float)
+    d = np.asarray(d, dtype=float)
+    m = np.nan_to_num(np.clip(m, -1, 1), nan=0.0)
+    d = np.nan_to_num(np.clip(d, 0, None), nan=0.0)
+
     local_avg = gaussian_filter1d(m, sigma=sigma_avg, axis=1)
     pw = m - local_avg
     local_fluct = gaussian_filter1d(np.abs(pw), sigma=sigma_fluct, axis=1)
 
-    c = autocorr_center
-    w = autocorr_window
-    corr = np.zeros((m.shape[0], 2 * w))
-    for i in range(m.shape[0]):
-        seg = local_fluct[i, c - w:c + w]
-        if len(seg) > 0:
-            corr[i, :] = autocorr(seg)
-
-    return m, d, local_fluct, corr
+    return m, d, local_fluct
 
 
 def _build_group_indices(y_raw, rounding_decimals=6):
@@ -421,6 +704,28 @@ def _merge_close_same_sign_peaks(peak_idx, x_axis_um, min_sep_um):
         merged_x.append(float(xmid))
 
     return np.asarray(merged_idx, dtype=int), np.asarray(merged_x, dtype=float)
+
+
+def _infer_start_sign_from_signed_walls(pos_walls, neg_walls):
+    """
+    Infer left-domain sign from first signed defect:
+      - first negative derivative peak (down step)  => start at +1
+      - first positive derivative peak (up step)    => start at -1
+    Returns +1.0, -1.0, or None if unavailable.
+    """
+    pos = np.asarray(pos_walls if pos_walls is not None else [], dtype=float)
+    neg = np.asarray(neg_walls if neg_walls is not None else [], dtype=float)
+
+    if pos.size == 0 and neg.size == 0:
+        return None
+    if pos.size == 0:
+        return 1.0
+    if neg.size == 0:
+        return -1.0
+
+    first_pos = float(np.min(pos))
+    first_neg = float(np.min(neg))
+    return 1.0 if first_neg < first_pos else -1.0
 
 
 def compute_fluctuation_sigma2_waterfall(M_shots, y_raw, sigma_fluct, sigma_avg):
@@ -505,14 +810,101 @@ def plot_fluctuations_waterfall(sigma2_map, y_vals, dy, y_axis_label, title, par
         if vmax > 0:
             coll.set_clim(0.0, vmax)
 
-    ax.axvline(x=x_min_um, color='white', linestyle='--', alpha=0.8)
-    ax.axvline(x=x_max_um, color='white', linestyle='--', alpha=0.8)
-    ax.set_xlim(x_plot_um[0], x_plot_um[-1])
+    ax.axvline(x=x_min_um, color='lime', linestyle='--', linewidth=2.0, alpha=0.95)
+    ax.axvline(x=x_max_um, color='lime', linestyle='--', linewidth=2.0, alpha=0.95)
+    x_plot_m = x_plot_um * 1e-6
+    ax.set_xlim(x_plot_m[0], x_plot_m[-1])
     ax.set_ylim(np.min(y_vals) - dy, np.max(y_vals) + dy)
     ax.set_ylabel(y_axis_label)
-    ax.set_xlabel(r'$\mu m$')
+    ax.set_xlabel('x [μm]')
     ax.set_title(title)
     plt.colorbar(coll, ax=ax, label=r'Local $\sigma^2$ of $m - \langle m \rangle$')
+
+
+def plot_used_region_density_fluctuations(D, y_unique, dy, y_axis_label, title, params, um_per_px, mode_cfg=None):
+    """Plot density fluctuations (density - shot_avg_density) in the used region as a waterfall.
+    
+    Left panel: Sum of squared density fluctuations for each shot.
+    Right panel: Waterfall of density fluctuations across the used region.
+    
+    Parameters:
+        mode_cfg: Optional dict with 'density_fluct_y_label' to override y-axis label
+    """
+    x_min_um = params['X_MIN_INTEGRATION']
+    x_max_um = params['X_MAX_INTEGRATION']
+    x_centers_um = np.arange(D.shape[1]) * um_per_px
+    xmin_ind = int(np.argmin(np.abs(x_centers_um - x_min_um)))
+    xmax_ind = int(np.argmin(np.abs(x_centers_um - x_max_um)))
+    
+    if xmax_ind < xmin_ind:
+        xmin_ind, xmax_ind = xmax_ind, xmin_ind
+    
+    if xmax_ind <= xmin_ind:
+        print("Warning: Invalid used region bounds in plot_used_region_density_fluctuations")
+        return
+    
+    # Extract used region
+    D_used = D[:, xmin_ind:xmax_ind]
+    x_used_px = np.arange(-0.5, D_used.shape[1], 1)
+    x_used_um = x_used_px * um_per_px + x_min_um
+    
+    # Compute density fluctuations for each shot: D_fluct[i, j] = D[i, j] - mean(D[i, :])
+    D_shot_avg = np.mean(D_used, axis=1, keepdims=True)
+    D_fluct = D_used - D_shot_avg
+    
+    # Compute sum of squared fluctuations for each shot
+    sum_sq_fluct = np.sum(D_fluct**2, axis=1)
+    
+    # Use custom y-axis label if provided in mode_cfg
+    plot_y_label = y_axis_label
+    if mode_cfg is not None and mode_cfg.get('density_fluct_y_label') is not None:
+        plot_y_label = mode_cfg['density_fluct_y_label']
+    
+    # Create figure with 2 subplots (left for integrated, right for waterfall)
+    fig, (ax_left, ax_right) = plt.subplots(
+        ncols=2,
+        tight_layout=True,
+        figsize=(10, 5),
+        sharey=True,
+        gridspec_kw={'width_ratios': [0.3, 1]},
+    )
+    
+    # Left panel: Plot sum of squared fluctuations vs y_unique
+    ax_left.plot(sum_sq_fluct, y_unique, 'b-', linewidth=1.5, label='Sum($D_{fluct}^2$)')
+    ax_left.set_xlabel(r'$\sum_x (D - \langle D \rangle)^2$ (a.u.)')
+    ax_left.set_ylabel(plot_y_label)
+    ax_left.grid(True, alpha=0.3)
+    ax_left.legend(loc='best', fontsize=9)
+    
+    # Right panel: Waterfall plot of density fluctuations
+    polys, colors = [], []
+    for i in range(len(y_unique)):
+        for j in range(D_fluct.shape[1]):
+            polys.append([
+                (x_used_um[j], y_unique[i] - dy / 2),
+                (x_used_um[j + 1], y_unique[i] - dy / 2),
+                (x_used_um[j + 1], y_unique[i] + dy / 2),
+                (x_used_um[j], y_unique[i] + dy / 2),
+            ])
+            colors.append(D_fluct[i, j])
+    
+    coll = PolyCollection(polys, array=np.array(colors), cmap='RdBu_r')
+    ax_right.add_collection(coll)
+    
+    # Set color limits symmetrically around zero for better visualization
+    finite_colors = np.array(colors)
+    finite_colors = finite_colors[np.isfinite(finite_colors)]
+    if finite_colors.size > 0:
+        vmax = np.max(np.abs(finite_colors))
+        if vmax > 0:
+            coll.set_clim(-vmax, vmax)
+    
+    ax_right.set_xlim(x_used_um[0], x_used_um[-1])
+    ax_right.set_ylim(np.min(y_unique) - dy, np.max(y_unique) + dy)
+    ax_right.set_xlabel('x [μm]')
+    ax_right.set_title(title)
+    cbar = plt.colorbar(coll, ax=ax_right)
+    cbar.set_label(r'Density - shot avg density (a.u.)')
 
 
 def _sectioned_sigmoid_analysis(M, y_unique, x_plot_um, xmin_ind, xmax_ind, num_sections):
@@ -573,15 +965,22 @@ def plot_main_waterfall(
     ax_int, ax_m, ax_d = axs
     x_plot_px = np.arange(-0.5, M.shape[1], 1)
     x_plot_um = x_plot_px * um_per_px
+    
+    # For bubbles_evolution, convert coordinates to meters and prepare for y-axis inversion
+    is_bubbles_evolution = scan == 'bubbles_evolution'
+    if is_bubbles_evolution:
+        x_plot_plot = x_plot_um * 1e-6  # Convert to meters
+    else:
+        x_plot_plot = x_plot_um
 
     polys_M, colors_M = [], []
     for i in range(len(y_unique)):
         for j in range(M.shape[1]):
             polys_M.append([
-                (x_plot_um[j], y_unique[i] - dy / 2),
-                (x_plot_um[j + 1], y_unique[i] - dy / 2),
-                (x_plot_um[j + 1], y_unique[i] + dy / 2),
-                (x_plot_um[j], y_unique[i] + dy / 2),
+                (x_plot_plot[j], y_unique[i] - dy / 2),
+                (x_plot_plot[j + 1], y_unique[i] - dy / 2),
+                (x_plot_plot[j + 1], y_unique[i] + dy / 2),
+                (x_plot_plot[j], y_unique[i] + dy / 2),
             ])
             colors_M.append(M[i, j])
 
@@ -589,15 +988,16 @@ def plot_main_waterfall(
     if params['WATERFALL_MAG_CLIM'] is not None:
         collection_M.set_clim(*params['WATERFALL_MAG_CLIM'])
     ax_m.add_collection(collection_M)
+    mag_vmin, mag_vmax = collection_M.get_clim()
 
     polys_D, colors_D = [], []
     for i in range(len(y_unique)):
         for j in range(D.shape[1]):
             polys_D.append([
-                (x_plot_um[j], y_unique[i] - dy / 2),
-                (x_plot_um[j + 1], y_unique[i] - dy / 2),
-                (x_plot_um[j + 1], y_unique[i] + dy / 2),
-                (x_plot_um[j], y_unique[i] + dy / 2),
+                (x_plot_plot[j], y_unique[i] - dy / 2),
+                (x_plot_plot[j + 1], y_unique[i] - dy / 2),
+                (x_plot_plot[j + 1], y_unique[i] + dy / 2),
+                (x_plot_plot[j], y_unique[i] + dy / 2),
             ])
             colors_D.append(D[i, j])
 
@@ -612,10 +1012,18 @@ def plot_main_waterfall(
     x_centers_um = np.arange(M.shape[1]) * um_per_px
     xmin_ind = np.argmin(np.abs(x_centers_um - x_min_um))
     xmax_ind = np.argmin(np.abs(x_centers_um - x_max_um))
+    
+    # Convert to appropriate units for plot
+    if is_bubbles_evolution:
+        x_min_plot = x_min_um * 1e-6
+        x_max_plot = x_max_um * 1e-6
+    else:
+        x_min_plot = x_min_um
+        x_max_plot = x_max_um
 
     for axis in [ax_m, ax_d]:
-        axis.axvline(x=x_min_um, color='black', linestyle='--')
-        axis.axvline(x=x_max_um, color='black', linestyle='--')
+        axis.axvline(x=x_min_plot, color='lime', linestyle='--', linewidth=2.0, alpha=0.95)
+        axis.axvline(x=x_max_plot, color='lime', linestyle='--', linewidth=2.0, alpha=0.95)
 
     if xmax_ind > xmin_ind:
         integrated_M = np.sum(M[:, xmin_ind:xmax_ind], axis=1) / (xmax_ind - xmin_ind)
@@ -629,15 +1037,13 @@ def plot_main_waterfall(
         ax_int_std.legend(loc='upper right')
 
     section_centers_x, sigmoid_centers_y, sigmoid_centers_err = [], [], []
+
     if plot_flags.get('sectioned_sigmoid', False) and scan in ('ARP_Forward', 'ARP_Backward') and xmax_ind > xmin_ind:
         section_centers_x, sigmoid_centers_y, sigmoid_centers_err, _ = _sectioned_sigmoid_analysis(
             M, y_unique, x_plot_um, xmin_ind, xmax_ind, params['NUM_SECTIONS']
         )
         if len(section_centers_x) > 0:
-            ax_m.scatter(section_centers_x, sigmoid_centers_y, c='magenta', s=70, edgecolors='white', linewidths=1)
-            ax_m.plot(section_centers_x, sigmoid_centers_y, 'w--', linewidth=2, alpha=0.7)
-            
-            ax_m.legend(['Sigmoid centers'], loc='upper right', fontsize=10)
+            ax_m.plot(section_centers_x, sigmoid_centers_y, color='violet', linewidth=2.5, label='Sigmoid centers')
 
             # Dedicated plot: sigmoid center (scan variable value) vs x section position
             fig_sig, ax_sig = plt.subplots(figsize=(8, 5), tight_layout=True)
@@ -682,7 +1088,7 @@ def plot_main_waterfall(
                 except Exception as e:
                     print(f"Warning: Could not interpolate sigmoid centers: {e}")
             
-            ax_sig.set_xlabel(r'$\mu m$')
+            ax_sig.set_xlabel('x [m]' if is_bubbles_evolution else r'$\mu m$')
             ax_sig.set_ylabel(f'{y_axis_label} (sigmoid center)')
             if average:
                 ax_sig.set_title('Average sigmoid center vs x')
@@ -691,13 +1097,123 @@ def plot_main_waterfall(
             ax_sig.legend(loc='best')
             ax_sig.grid(True, alpha=0.3)
 
-    ax_m.set_ylabel(y_axis_label)
-    ax_m.set_xlabel(r'$\mu m$')
-    ax_m.set_xlim(x_plot_um[0], x_plot_um[-1])
+    ax_m.set_ylabel(y_axis_label if not is_bubbles_evolution else 't [ms]')
+    # For bubbles_evolution, convert x-axis from micrometers to meters
+    if is_bubbles_evolution:
+        x_plot_m = x_plot_um * 1e-6
+        ax_m.set_xlabel('x [m]')
+        ax_m.set_xlim(x_plot_m[0], x_plot_m[-1])
+    else:
+        ax_m.set_xlabel('x [μm]')
+        ax_m.set_xlim(x_plot_um[0], x_plot_um[-1])
     ax_m.set_ylim(np.min(y_unique) - dy, np.max(y_unique) + dy)
     ax_m.set_title(title, fontsize=10)
+    
+    # Show y-axis tick labels on the central waterfall plot
+    ax_m.tick_params(axis='y', labelleft=True)
+    
+    # Invert y-axis for bubbles_evolution
+    if is_bubbles_evolution:
+        ax_m.invert_yaxis()
+        ax_d.invert_yaxis()
+        ax_int.invert_yaxis()
 
     # Overlay detected defect positions for KZ_defect_analysis.
+    dx_p = np.asarray(defect_points_pos[0], dtype=float) if defect_points_pos is not None else np.asarray([], dtype=float)
+    dy_p = np.asarray(defect_points_pos[1], dtype=float) if defect_points_pos is not None else np.asarray([], dtype=float)
+    dx_n = np.asarray(defect_points_neg[0], dtype=float) if defect_points_neg is not None else np.asarray([], dtype=float)
+    dy_n = np.asarray(defect_points_neg[1], dtype=float) if defect_points_neg is not None else np.asarray([], dtype=float)
+    dx_c = np.asarray(defect_points_corrected[0], dtype=float) if defect_points_corrected is not None else np.asarray([], dtype=float)
+    dy_c = np.asarray(defect_points_corrected[1], dtype=float) if defect_points_corrected is not None else np.asarray([], dtype=float)
+
+    def _plot_identified_domain_binary_profile():
+        """Overlay a color-coded binary (±1) domain strip below each shot."""
+        if scan not in ('KZ_defect_analysis', 'KZ_det_scan'):
+            return
+        if len(y_unique) == 0 or M.size == 0:
+            return
+
+        x_axis = np.arange(M.shape[1], dtype=float) * float(um_per_px)
+        if x_axis.size < 2:
+            return
+        x_left = float(x_axis[0])
+        x_right = float(x_axis[-1])
+        tol_y = max(1e-9, 1e-6 * abs(float(dy)))
+
+        y_center_offset = -0.33 * abs(float(dy))
+        strip_thickness = 0.32 * abs(float(dy))
+        polys_bin, colors_bin = [], []
+
+        for i, yv in enumerate(y_unique):
+            walls = []
+            walls_pos = np.asarray([], dtype=float)
+            walls_neg = np.asarray([], dtype=float)
+            if dx_p.size > 0:
+                walls_pos = np.asarray(dx_p[np.isclose(dy_p, float(yv), atol=tol_y, rtol=0.0)], dtype=float)
+                walls.extend(walls_pos.tolist())
+            if dx_n.size > 0:
+                walls_neg = np.asarray(dx_n[np.isclose(dy_n, float(yv), atol=tol_y, rtol=0.0)], dtype=float)
+                walls.extend(walls_neg.tolist())
+            if dx_c.size > 0:
+                walls.extend(dx_c[np.isclose(dy_c, float(yv), atol=tol_y, rtol=0.0)].tolist())
+
+            if len(walls) > 0:
+                walls = np.unique(np.round(np.asarray(walls, dtype=float), 6))
+                walls = walls[(walls > x_left) & (walls < x_right)]
+            else:
+                walls = np.asarray([], dtype=float)
+
+            edges = np.concatenate(([x_left], walls, [x_right]))
+            if edges.size < 2:
+                continue
+
+            m_row = np.asarray(M[i], dtype=float)
+            if walls.size > 0:
+                left_mask = x_axis < float(walls[0])
+                if not np.any(left_mask):
+                    left_mask = x_axis <= float(walls[0])
+            else:
+                left_mask = np.ones_like(x_axis, dtype=bool)
+
+            sign_from_defect = _infer_start_sign_from_signed_walls(walls_pos, walls_neg)
+            if sign_from_defect is not None:
+                sign_val = float(sign_from_defect)
+            else:
+                used_mask = (x_axis >= float(x_min_um)) & (x_axis <= float(x_max_um))
+                avg_m = np.nanmean(m_row[used_mask]) if np.any(used_mask) else np.nanmean(m_row)
+                sign_val = 1.0 if np.nan_to_num(avg_m, nan=0.0) > 0.0 else -1.0
+
+            # Build per-pixel binary profile from detected walls.
+            n_flips = np.searchsorted(walls, x_axis, side='right')
+            row_bin = sign_val * ((-1.0) ** n_flips)
+            used_mask = (x_axis >= float(x_min_um)) & (x_axis <= float(x_max_um))
+            row_bin = np.where(used_mask, row_bin, 0.0)
+
+            y0 = float(yv) + y_center_offset - 0.5 * strip_thickness
+            y1 = float(yv) + y_center_offset + 0.5 * strip_thickness
+            for j in range(M.shape[1]):
+                polys_bin.append([
+                    (x_plot_um[j], y0),
+                    (x_plot_um[j + 1], y0),
+                    (x_plot_um[j + 1], y1),
+                    (x_plot_um[j], y1),
+                ])
+                colors_bin.append(float(row_bin[j]))
+
+        if len(polys_bin) > 0:
+            coll_bin = PolyCollection(polys_bin, array=np.asarray(colors_bin, dtype=float), cmap='RdBu')
+            coll_bin.set_clim(mag_vmin, mag_vmax)
+            coll_bin.set_alpha(1.0)
+            coll_bin.set_zorder(14)
+            ax_m.add_collection(coll_bin)
+
+        # Delineate each shot pair (main row + binary strip) with horizontal guides.
+        x_l = float(x_plot_um[0])
+        x_r = float(x_plot_um[-1])
+        for i in range(len(y_unique) - 1):
+            y_sep = 0.5 * (float(y_unique[i]) + float(y_unique[i + 1]))
+            ax_m.hlines(y_sep, x_l, x_r, colors='yellow', linestyles='--', linewidth=1.1, alpha=0.75, zorder=15)
+
     if defect_points is not None and defect_points_pos is None and defect_points_neg is None:
         dx, dy_pts = defect_points
         if len(dx) > 0:
@@ -715,7 +1231,6 @@ def plot_main_waterfall(
 
     # Overlay corrected defects found from zero-crossing rule.
     if defect_points_corrected is not None:
-        dx_c, dy_c = defect_points_corrected
         if len(dx_c) > 0:
             ax_m.scatter(
                 dx_c,
@@ -746,7 +1261,6 @@ def plot_main_waterfall(
 
     # Guide markers: sign of derivative peaks selected by threshold.
     if defect_points_pos is not None:
-        dx_p, dy_p = defect_points_pos
         if len(dx_p) > 0:
             ax_m.scatter(
                 dx_p,
@@ -761,7 +1275,6 @@ def plot_main_waterfall(
             )
 
     if defect_points_neg is not None:
-        dx_n, dy_n = defect_points_neg
         if len(dx_n) > 0:
             ax_m.scatter(
                 dx_n,
@@ -774,6 +1287,8 @@ def plot_main_waterfall(
                 zorder=12,
                 label='Negative defects (-)',
             )
+
+    _plot_identified_domain_binary_profile()
 
     handles, labels = ax_m.get_legend_handles_labels()
     if len(handles) > 0:
@@ -812,8 +1327,8 @@ def plot_main_waterfall(
         x_centers_um = np.arange(M.shape[1]) * um_per_px
         ax_density.plot(x_centers_um, avg_density, 'b-', linewidth=2, label='Average Density')
         ax_density.fill_between(x_centers_um, avg_density - std_density, avg_density + std_density, alpha=0.3, color='blue')
-        ax_density.axvline(x=x_min_um, color='red', linestyle='--', linewidth=2)
-        ax_density.axvline(x=x_max_um, color='red', linestyle='--', linewidth=2)
+        ax_density.axvline(x=x_min_um, color='lime', linestyle='--', linewidth=2.2, alpha=0.95)
+        ax_density.axvline(x=x_max_um, color='lime', linestyle='--', linewidth=2.2, alpha=0.95)
         if plot_flags.get('corr_sigmoid_density', False) and scan in ('ARP_Forward', 'ARP_Backward') and len(section_centers_x) > 0:
             ax2 = ax_density.twinx()
             ax2.errorbar(section_centers_x, sigmoid_centers_y, yerr=sigmoid_centers_err, fmt='ro-', capsize=3)
@@ -830,8 +1345,8 @@ def plot_main_waterfall(
         ax_mag.plot(x_centers_um, avg_m, 'r-', linewidth=2, label='Average Magnetization')
         ax_mag.fill_between(x_centers_um, avg_m - std_m, avg_m + std_m, alpha=0.3, color='red')
         ax_mag.axhline(y=0, color='k', linewidth=1, alpha=0.3)
-        ax_mag.axvline(x=x_min_um, color='blue', linestyle='--', linewidth=2)
-        ax_mag.axvline(x=x_max_um, color='blue', linestyle='--', linewidth=2)
+        ax_mag.axvline(x=x_min_um, color='lime', linestyle='--', linewidth=2.2, alpha=0.95)
+        ax_mag.axvline(x=x_max_um, color='lime', linestyle='--', linewidth=2.2, alpha=0.95)
 
         # Auto-zoom y-range to show behavior clearly (instead of fixed [-1, 1]).
         # Use values in the analysis x-window, including uncertainty band.
@@ -880,32 +1395,28 @@ def plot_main_waterfall(
         ax_corr.grid(True, alpha=0.3)
 
 
-def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, central_autocorr, M, params, um_per_px):
-    w = params['AUTOCORR_WINDOW']
+def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_per_px):
 
     fig_fluct, ax_fluct = plt.subplots()
     z_fluc_smooth = gaussian_filter1d(z_local_fluctuations, sigma=2, axis=0)
     start_idx, end_idx = 950, 1220
-    x_axis_mesh = np.linspace(930 * um_per_px, 1240 * um_per_px, z_fluc_smooth[:, start_idx:end_idx].shape[1])
+    x_axis_mesh = np.linspace(930 * um_per_px, 1240 * um_per_px, z_fluc_smooth[:, start_idx:end_idx].shape[1]) * 1e-6
     im_fluct = ax_fluct.pcolormesh(x_axis_mesh, y_plot, z_fluc_smooth[:, start_idx:end_idx], cmap='inferno')
     ax_fluct.set_title('Local z fluctuations')
     ax_fluct.set_ylabel(y_axis_label)
-    ax_fluct.set_xlabel(r'$\mu m$')
+    ax_fluct.set_xlabel('x [μm]')
+    ax_fluct.invert_yaxis()
     plt.colorbar(im_fluct, ax=ax_fluct)
-
-    fig_corr, ax_corr = plt.subplots()
-    central_corr_smooth = gaussian_filter1d(central_autocorr, sigma=2, axis=0)
-    im_corr = ax_corr.pcolormesh(np.linspace(0, 2 * w - 1, 2 * w), y_plot, central_corr_smooth, vmin=-1.0, vmax=1.0, cmap='viridis')
-    plt.colorbar(im_corr, ax=ax_corr)
 
     fig_evol, ax_evol = plt.subplots()
     m_copy = np.copy(M)[:, 920:1240] ** 2
     m_copy = gaussian_filter1d(m_copy, sigma=2, axis=1)
-    x_evol_mesh = np.linspace(920 * um_per_px, 1240 * um_per_px, m_copy.shape[1])
+    x_evol_mesh = np.linspace(920 * um_per_px, 1240 * um_per_px, m_copy.shape[1]) * 1e-6
     im_evol = ax_evol.pcolormesh(x_evol_mesh, y_plot, m_copy, vmin=0, vmax=0.001, cmap='viridis')
-    ax_evol.set_ylabel(y_axis_label)
-    ax_evol.set_xlabel(r'$\mu m$')
+    ax_evol.set_ylabel('t [ms]')
+    ax_evol.set_xlabel('x [μm]')
     ax_evol.set_title('Magnetization evolution in the bubble region')
+    ax_evol.invert_yaxis()
     plt.colorbar(im_evol, ax=ax_evol)
 
 
@@ -919,18 +1430,38 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
 
     um_per_px = get_um_per_px(params)
 
-    df_subset = filter_dataframe(df, seqs, constraints)
+    shot_name_filter = mode_cfg.get('shot_name_filter', None) if isinstance(mode_cfg, dict) else None
+    df_subset = filter_dataframe(df, seqs, constraints, shot_name_filter=shot_name_filter)
     if scan == 'ARPF_feedback' or scan == 'DMD_density_feedback':
-        df_subset = filter_valid_feedback_shots(df_subset)
+        skip_feedback_filter = mode_cfg.get('skip_feedback_filter', False) if isinstance(mode_cfg, dict) else False
+        if not skip_feedback_filter:
+            df_subset = filter_valid_feedback_shots(df_subset)
+        else:
+            print("DEBUG: Skipping feedback shot filtering per mode config")
 
     y_axis_col, title_base = get_scan_config(scan)
+    
+    # Allow override of scan variable from mode config
+    if mode_cfg is not None and isinstance(mode_cfg, dict):
+        scan_var_override = mode_cfg.get('scan_variable_override', None)
+        if scan_var_override is not None:
+            y_axis_col = scan_var_override
+            print(f"DEBUG: Scan variable overridden to '{y_axis_col}'")
+    
     y_axis_label = 'shot index' if y_axis_col == '_shot_counter' else y_axis_col
     print(f"DEBUG: Using y_axis_col = '{y_axis_col}' for scan '{scan}'")
-    m1_lbl = (data_origin, 'm1_1d')
-    m2_lbl = (data_origin, 'm2_1d')
 
     sorted_df = df_subset.sort_values(y_axis_col)
-    good_mask = get_valid_rows_mask(sorted_df, params['BACK_CHECK_THRESHOLD'], params['NTOT_CHECK_THRESHOLD'])
+    modality_cfg = _resolve_modality(mode_cfg if isinstance(mode_cfg, dict) else {}, params)
+    um_per_px = get_um_per_px(params, camera_name_override=modality_cfg.get('camera_name'))
+    shot_filter_cfg = mode_cfg.get('shot_filter', {}) if isinstance(mode_cfg, dict) else {}
+    filter_data_origin = modality_cfg.get('data_origin', data_origin)
+    good_mask = get_valid_rows_mask(
+        sorted_df,
+        filter_cfg=shot_filter_cfg,
+        modality_cfg=modality_cfg,
+        data_origin=filter_data_origin,
+    )
     sorted_df = sorted_df[good_mask]
 
     if sorted_df.empty:
@@ -949,18 +1480,14 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                 det_txt = str(det_val)
             print(f"  det={det_txt}: {len(idx)} shots")
 
-    m1_unpacked, m2_unpacked, img_dims = unpack_images(sorted_df, m1_lbl, m2_lbl)
-    if m1_unpacked is None:
+    profile_inputs = build_magnetization_inputs(sorted_df, mode_cfg if isinstance(mode_cfg, dict) else {}, params, data_origin)
+    if profile_inputs is None:
+        print('No valid magnetization profile columns found for selected modality.')
         return
-
-    M_full, D_full, z_fluc_full, corr_full = process_magnetization(
-        m1_unpacked,
-        m2_unpacked,
-        params['SIGMA_Z_LOCAL_AVG'],
-        params['SIGMA_Z_LOCAL_FLUCT'],
-        params['AUTOCORR_CENTER'],
-        params['AUTOCORR_WINDOW'],
-    )
+    M_full = profile_inputs['M_full']
+    D_full = profile_inputs['D_full']
+    z_fluc_full = profile_inputs['z_fluc_full']
+    img_dims = profile_inputs['img_dims']
 
     rep_indices = None
     if average:
@@ -968,23 +1495,13 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             print('No groups found for averaging.')
             return
 
-        m1_final = np.zeros((len(grouped_indices), img_dims))
-        m2_final = np.zeros((len(grouped_indices), img_dims))
+        M_final = np.zeros((len(grouped_indices), img_dims))
+        D_final = np.zeros((len(grouped_indices), img_dims))
         z_fluc_final = np.zeros((len(grouped_indices), z_fluc_full.shape[1]))
-        corr_final = np.zeros((len(grouped_indices), corr_full.shape[1]))
         for i, idx in enumerate(grouped_indices):
-            m1_final[i] = np.mean(m1_unpacked[idx], axis=0)
-            m2_final[i] = np.mean(m2_unpacked[idx], axis=0)
+            M_final[i] = np.mean(M_full[idx], axis=0)
+            D_final[i] = np.mean(D_full[idx], axis=0)
             z_fluc_final[i] = np.mean(z_fluc_full[idx], axis=0)
-            corr_final[i] = np.mean(corr_full[idx], axis=0)
-        M_final, D_final, _, _ = process_magnetization(
-            m1_final,
-            m2_final,
-            params['SIGMA_Z_LOCAL_AVG'],
-            params['SIGMA_Z_LOCAL_FLUCT'],
-            params['AUTOCORR_CENTER'],
-            params['AUTOCORR_WINDOW'],
-        )
         y_final = grouped_y
     else:
         # Keep one representative shot per scan point (first in sorted order)
@@ -995,7 +1512,6 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         M_final = M_full[rep_indices]
         D_final = D_full[rep_indices]
         z_fluc_final = z_fluc_full[rep_indices]
-        corr_final = corr_full[rep_indices]
         y_final = grouped_y
 
     dy = np.min(np.diff(y_final)) if len(y_final) > 1 else 0.1
@@ -1011,120 +1527,71 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
     avg_defects = None
     stat_err = None
     if scan == 'KZ_defect_analysis':
-        # Optional per-mode settings live in waterfall_config MODE_CONFIGS['KZ_defect_analysis']['defect_analysis']
-        # with keys for signed-derivative peak detection.
-        gauss_sigma = 2.0
-        deriv_threshold = 0.09
-        deriv_threshold_pos = 0.09
-        deriv_threshold_neg = -0.09
-        zero_crossing_min_distance_um = 5.0
-        peak_step_filter_enabled = False
-        peak_step_filter_window_px = 4
-        peak_step_filter_min_abs_delta_m = 0.3
-        min_same_sign_peak_distance_um = 4.0
-        defect_position_hist_half_window_um = 2.0
-        try:
-            defect_cfg = mode_cfg.get('defect_analysis', {}) if isinstance(mode_cfg, dict) else {}
-            gauss_sigma = float(defect_cfg.get('gaussian_sigma', gauss_sigma))
-            deriv_threshold = float(defect_cfg.get('derivative_threshold', deriv_threshold))
-            deriv_threshold_pos = float(defect_cfg.get('derivative_threshold_pos', deriv_threshold))
-            deriv_threshold_neg = float(defect_cfg.get('derivative_threshold_neg', -abs(deriv_threshold_pos)))
-            zero_crossing_min_distance_um = float(defect_cfg.get('zero_crossing_min_distance_um', zero_crossing_min_distance_um))
-            peak_step_filter_enabled = bool(defect_cfg.get('peak_step_filter_enabled', peak_step_filter_enabled))
-            peak_step_filter_window_px = int(defect_cfg.get('peak_step_filter_window_px', peak_step_filter_window_px))
-            peak_step_filter_min_abs_delta_m = float(defect_cfg.get('peak_step_filter_min_abs_delta_m', peak_step_filter_min_abs_delta_m))
-            min_same_sign_peak_distance_um = float(defect_cfg.get('min_same_sign_peak_distance_um', min_same_sign_peak_distance_um))
-            defect_position_hist_half_window_um = float(defect_cfg.get('defect_position_hist_half_window_um', defect_position_hist_half_window_um))
-        except Exception:
-            pass
-        peak_step_filter_window_px = max(1, int(peak_step_filter_window_px))
-        peak_step_filter_min_abs_delta_m = max(0.0, float(peak_step_filter_min_abs_delta_m))
-        min_same_sign_peak_distance_um = max(0.0, float(min_same_sign_peak_distance_um))
-        defect_position_hist_half_window_um = max(0.0, float(defect_position_hist_half_window_um))
+        defect_cfg = dict(mode_cfg.get('defect_analysis_global', {}) if isinstance(mode_cfg, dict) else {})
+        if isinstance(mode_cfg, dict):
+            defect_cfg.update(mode_cfg.get('defect_analysis', {}))
+            defect_cfg.update(mode_cfg.get('defect_analysis_override', {}))
+        defect_cfg = defect_lib.normalize_defect_config(defect_cfg)
+        defect_position_hist_half_window_um = max(0.0, float(defect_cfg.get('defect_position_hist_half_window_um', 4.0)))
+
+        gauss_sigma = float(defect_cfg['gaussian_sigma'])
+        deriv_threshold_pos = float(defect_cfg['derivative_threshold_pos'])
+        deriv_threshold_neg = float(defect_cfg['derivative_threshold_neg'])
+        peak_step_filter_enabled = bool(defect_cfg['peak_step_filter_enabled'])
+        peak_step_filter_window_px = int(defect_cfg['peak_step_filter_window_px'])
+        peak_step_filter_min_abs_delta_m = float(defect_cfg['peak_step_filter_min_abs_delta_m'])
+        min_same_sign_peak_distance_um = float(defect_cfg['min_same_sign_peak_distance_um'])
+        zero_crossing_min_distance_um = float(defect_cfg['zero_crossing_min_distance_um'])
 
         x_centers_um = np.arange(M_final.shape[1]) * um_per_px
         x_min_um = float(params['X_MIN_INTEGRATION'])
         x_max_um = float(params['X_MAX_INTEGRATION'])
-        xmin_ind = int(np.argmin(np.abs(x_centers_um - x_min_um)))
-        xmax_ind = int(np.argmin(np.abs(x_centers_um - x_max_um)))
-        if xmax_ind < xmin_ind:
-            xmin_ind, xmax_ind = xmax_ind, xmin_ind
 
         defect_x, defect_y = [], []
+        defect_x_pos, defect_y_pos = [], []
+        defect_x_neg, defect_y_neg = [], []
         defect_x_corr, defect_y_corr = [], []
+        defect_x_rej, defect_y_rej = [], []
         per_shot_counts = []
-        d_rois = []
-        m_rois = []
-
-        def _count_peak_indices_pos(d_signal, threshold):
-            if d_signal.size < 3:
-                return np.array([], dtype=int)
-            local_max = (d_signal[1:-1] >= d_signal[:-2]) & (d_signal[1:-1] > d_signal[2:])
-            above = d_signal[1:-1] >= threshold
-            return np.where(local_max & above)[0] + 1
-
-        def _count_peak_indices_neg(d_signal, threshold):
-            if d_signal.size < 3:
-                return np.array([], dtype=int)
-            local_min = (d_signal[1:-1] <= d_signal[:-2]) & (d_signal[1:-1] < d_signal[2:])
-            below = d_signal[1:-1] <= threshold
-            return np.where(local_min & below)[0] + 1
-
-        def _find_opposite_peak_x(d_roi, x_roi_um, sign_run, i_start, i_end):
-            if d_roi.size < 3:
-                return None
-            i0 = int(max(1, min(i_start, i_end)))
-            i1 = int(min(d_roi.size - 2, max(i_start, i_end)))
-            if i1 < i0:
-                return None
-
-            seg = d_roi[i0:i1 + 1]
-            if seg.size == 0:
-                return None
-
-            if sign_run == 'pos':
-                rel = int(np.argmin(seg))
-                idx = i0 + rel
-                is_local = bool((d_roi[idx] <= d_roi[idx - 1]) and (d_roi[idx] < d_roi[idx + 1]))
-                passes = bool(d_roi[idx] < 0.0)
-            else:
-                rel = int(np.argmax(seg))
-                idx = i0 + rel
-                is_local = bool((d_roi[idx] >= d_roi[idx - 1]) and (d_roi[idx] > d_roi[idx + 1]))
-                passes = bool(d_roi[idx] > 0.0)
-
-            if not (is_local and passes):
-                return None
-            return float(x_roi_um[idx])
-
-        def _passes_peak_step_filter(m_roi, peak_idx, window_px, min_abs_delta):
-            i = int(peak_idx)
-            l0 = i - int(window_px)
-            l1 = i
-            r0 = i + 1
-            r1 = i + 1 + int(window_px)
-            if l0 < 0 or r1 > m_roi.size:
-                return False
-            left_avg = float(np.mean(m_roi[l0:l1]))
-            right_avg = float(np.mean(m_roi[r0:r1]))
-            return abs(right_avg - left_avg) >= float(min_abs_delta)
+        corrected_total = 0
+        rejected_total = 0
 
         for i, yv in enumerate(y_final):
-            m_sig = M_final[i]
-            if gauss_sigma > 0:
-                m_sig = gaussian_filter1d(m_sig, sigma=gauss_sigma)
+            out_i = defect_lib.find_defects_in_profile(
+                M_final[i],
+                x_centers_um,
+                defect_cfg,
+                x_min_um,
+                x_max_um,
+            )
 
-            d_sig = np.gradient(m_sig)
-            if d_sig.size < 3 or xmax_ind - xmin_ind < 2:
-                d_rois.append(np.array([], dtype=float))
-                m_rois.append(np.array([], dtype=float))
-                continue
+            thr_all = np.asarray(out_i['threshold_x_all'], dtype=float)
+            thr_pos = np.asarray(out_i['threshold_x_pos'], dtype=float)
+            thr_neg = np.asarray(out_i['threshold_x_neg'], dtype=float)
+            corr_x = np.asarray(out_i['corrected_x'], dtype=float)
+            rej_x = np.asarray(out_i['rejected_x'], dtype=float)
 
-            # Store derivative signal inside configured integration window (in um).
-            d_roi = d_sig[xmin_ind:xmax_ind + 1]
-            m_roi = m_sig[xmin_ind:xmax_ind + 1]
-            d_rois.append(d_roi)
-            m_rois.append(m_roi)
+            per_shot_counts.append(int(out_i['count']))
+
+            for xx in thr_all:
+                defect_x.append(float(xx))
+                defect_y.append(yv)
+            for xx in thr_pos:
+                defect_x_pos.append(float(xx))
+                defect_y_pos.append(yv)
+            for xx in thr_neg:
+                defect_x_neg.append(float(xx))
+                defect_y_neg.append(yv)
+            for xx in corr_x:
+                defect_x_corr.append(float(xx))
+                defect_y_corr.append(yv)
+            for xx in rej_x:
+                defect_x_rej.append(float(xx))
+                defect_y_rej.append(yv)
+
+            corrected_total += len(corr_x)
+            rejected_total += len(rej_x)
+
         try:
             if rep_indices is not None:
                 defect_sequences_for_plot = sorted_df['rep'].values[rep_indices]
@@ -1132,125 +1599,6 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                 defect_sequences_for_plot = sorted_df['rep'].values
         except Exception:
             defect_sequences_for_plot = None
-        # Recount defects using fixed positive/negative thresholds.
-        per_shot_counts = []
-        defect_x, defect_y = [], []
-        defect_x_pos, defect_y_pos = [], []
-        defect_x_neg, defect_y_neg = [], []
-        defect_x_corr, defect_y_corr = [], []
-        defect_x_rej, defect_y_rej = [], []
-        corrected_total = 0
-        rejected_total = 0
-        x_roi_um = x_centers_um[xmin_ind:xmax_ind + 1]
-        for i, yv in enumerate(y_final):
-            d_roi = d_rois[i] if i < len(d_rois) else np.array([], dtype=float)
-            m_roi = m_rois[i] if i < len(m_rois) else np.array([], dtype=float)
-            thr_pos_i = float(deriv_threshold_pos)
-            thr_neg_i = float(deriv_threshold_neg)
-            if d_roi.size < 3:
-                per_shot_counts.append(0)
-                continue
-
-            peak_pos_raw = _count_peak_indices_pos(d_roi, thr_pos_i)
-            peak_neg_raw = _count_peak_indices_neg(d_roi, thr_neg_i)
-            peak_pos_roi = []
-            peak_neg_roi = []
-            rejected_idx = []
-            for idxp in peak_pos_raw:
-                if peak_step_filter_enabled and not _passes_peak_step_filter(m_roi, idxp, peak_step_filter_window_px, peak_step_filter_min_abs_delta_m):
-                    rejected_idx.append(int(idxp))
-                else:
-                    peak_pos_roi.append(int(idxp))
-            for idxn in peak_neg_raw:
-                if peak_step_filter_enabled and not _passes_peak_step_filter(m_roi, idxn, peak_step_filter_window_px, peak_step_filter_min_abs_delta_m):
-                    rejected_idx.append(int(idxn))
-                else:
-                    peak_neg_roi.append(int(idxn))
-            peak_pos_roi, peak_pos_x = _merge_close_same_sign_peaks(
-                peak_pos_roi,
-                x_roi_um,
-                min_same_sign_peak_distance_um,
-            )
-            peak_neg_roi, peak_neg_x = _merge_close_same_sign_peaks(
-                peak_neg_roi,
-                x_roi_um,
-                min_same_sign_peak_distance_um,
-            )
-            peak_thr_x = np.concatenate([peak_pos_x, peak_neg_x]).astype(float)
-            events = []
-            for idxp in peak_pos_roi:
-                events.append((int(idxp), 'pos'))
-            for idxn in peak_neg_roi:
-                events.append((int(idxn), 'neg'))
-            events.sort(key=lambda e: e[0])
-
-            # Keep ALL threshold-selected peaks (user-requested behavior).
-            kept_thr_x = np.concatenate([peak_pos_x, peak_neg_x]).astype(float)
-            corrected_x_shot = []
-            j = 0
-            while j < len(events):
-                sign_j = events[j][1]
-                k = j
-                while k < len(events) and events[k][1] == sign_j:
-                    k += 1
-                run = events[j:k]
-
-                if len(run) >= 2:
-                    candidates = []
-                    # Search ONLY between adjacent same-sign peaks in the run.
-                    # This guarantees correction is local to regions bracketed by
-                    # two detected peaks of the same sign.
-                    for p in range(len(run) - 1):
-                        i_start = int(run[p][0])
-                        i_end = int(run[p + 1][0])
-                        sign_pair = run[p][1]
-                        ox = _find_opposite_peak_x(
-                            d_roi,
-                            x_roi_um,
-                            sign_pair,
-                            i_start,
-                            i_end,
-                        )
-                        if ox is not None:
-                            candidates.append(float(ox))
-
-                    for cx in candidates:
-                        if peak_thr_x.size == 0:
-                            corrected_x_shot.append(float(cx))
-                            continue
-                        min_dist = float(np.min(np.abs(peak_thr_x - float(cx))))
-                        if min_dist >= zero_crossing_min_distance_um:
-                            corrected_x_shot.append(float(cx))
-                j = k
-
-            if len(corrected_x_shot) > 1:
-                corrected_x_shot = list(np.unique(np.round(np.asarray(corrected_x_shot, dtype=float), 6)))
-
-            per_shot_counts.append(int(len(kept_thr_x) + len(corrected_x_shot)))
-
-            # Keep yellow markers for all threshold defects.
-            for x_thr in kept_thr_x:
-                defect_x.append(float(x_thr))
-                defect_y.append(yv)
-
-            # Add signed guide markers.
-            for x_p in peak_pos_x:
-                x_p = float(x_p)
-                defect_x_pos.append(x_p)
-                defect_y_pos.append(yv)
-            for x_n in peak_neg_x:
-                x_n = float(x_n)
-                defect_x_neg.append(x_n)
-                defect_y_neg.append(yv)
-            for idxr in rejected_idx:
-                defect_x_rej.append(float(x_roi_um[int(idxr)]))
-                defect_y_rej.append(yv)
-            rejected_total += len(rejected_idx)
-
-            for xcorr in corrected_x_shot:
-                defect_x_corr.append(float(xcorr))
-                defect_y_corr.append(yv)
-            corrected_total += len(corrected_x_shot)
 
         defect_points = (np.asarray(defect_x), np.asarray(defect_y))
         defect_points_pos = (np.asarray(defect_x_pos), np.asarray(defect_y_pos))
@@ -1330,7 +1678,13 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         all_defect_sizes = np.asarray(all_defect_sizes, dtype=float)
         if all_defect_sizes.size > 0:
             fig_hs, ax_hs = plt.subplots(figsize=(7.0, 4.2), tight_layout=True)
-            n_bins_size = max(3, int(np.sqrt(len(all_defect_sizes))))
+            # Read bin size from config with fallback to 'sqrt'
+            bin_size_config = defect_cfg.get('defect_size_hist_bin_size', 'sqrt')
+            if isinstance(bin_size_config, str):
+                n_bins_size = bin_size_config  # 'sqrt', 'fd', 'sturges', etc.
+            else:
+                # bin_size_config is a number (int or float), treat as bin width
+                n_bins_size = max(3, int(np.ceil((all_defect_sizes.max() - all_defect_sizes.min()) / float(bin_size_config)))) if float(bin_size_config) > 0 else 'sqrt'
             ax_hs.hist(all_defect_sizes, bins=n_bins_size, color='tab:green', alpha=0.75, edgecolor='black')
             ax_hs.set_xlabel(r'Defect size ($\mu m$, distance pos-to-neg)')
             ax_hs.set_ylabel('Count')
@@ -1365,13 +1719,13 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         min_same_sign_peak_distance_um_det = 4.0
         missed_defect_correction_method_det = 'opposite_peak'
         try:
-            from waterfall_config import MODE_CONFIGS as _wf_mode_configs
-            kz_ref_cfg = (
-                _wf_mode_configs.get('KZ_defect_analysis', {}).get('defect_analysis', {})
-                if hasattr(_wf_mode_configs, 'get')
-                else {}
-            )
-            det_cfg_override = mode_cfg.get('defect_analysis', {}) if isinstance(mode_cfg, dict) else {}
+            from waterfall_config import DEFECT_ANALYSIS_PARAMS as _wf_defect_cfg
+            kz_ref_cfg = dict(_wf_defect_cfg) if isinstance(_wf_defect_cfg, dict) else {}
+            det_cfg_override = {}
+            if isinstance(mode_cfg, dict):
+                det_cfg_override.update(mode_cfg.get('defect_analysis_global', {}))
+                det_cfg_override.update(mode_cfg.get('defect_analysis', {}))
+                det_cfg_override.update(mode_cfg.get('defect_analysis_override', {}))
             det_cfg = dict(kz_ref_cfg)
             det_cfg.update(det_cfg_override)
 
@@ -1528,7 +1882,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                 'fallback-min-diff',
             )
 
-        def _domain_balance_in_used_region(m_roi, x_roi_um, defect_edges_x, x_left, x_right):
+        def _domain_balance_in_used_region(m_roi, x_roi_um, defect_edges_x, x_left, x_right, start_sign=None):
             """Compute (L_pos - L_neg) / L_used from domain segments in one shot."""
             if m_roi.size == 0 or x_roi_um.size == 0:
                 return np.nan
@@ -1559,18 +1913,25 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                 if seg_len <= 0:
                     continue
 
-                mask = (x_roi_um >= xa) & (x_roi_um <= xb)
-                if np.any(mask):
-                    m_avg = float(np.mean(m_roi[mask]))
+                if start_sign is not None:
+                    seg_sign = float(start_sign) * ((-1.0) ** i)
+                    if seg_sign >= 0.0:
+                        l_pos += seg_len
+                    else:
+                        l_neg += seg_len
                 else:
-                    x_mid = 0.5 * (xa + xb)
-                    idx_mid = int(np.argmin(np.abs(x_roi_um - x_mid)))
-                    m_avg = float(m_roi[idx_mid])
+                    mask = (x_roi_um >= xa) & (x_roi_um <= xb)
+                    if np.any(mask):
+                        m_avg = float(np.mean(m_roi[mask]))
+                    else:
+                        x_mid = 0.5 * (xa + xb)
+                        idx_mid = int(np.argmin(np.abs(x_roi_um - x_mid)))
+                        m_avg = float(m_roi[idx_mid])
 
-                if m_avg >= 0.0:
-                    l_pos += seg_len
-                else:
-                    l_neg += seg_len
+                    if m_avg >= 0.0:
+                        l_pos += seg_len
+                    else:
+                        l_neg += seg_len
 
             return float((l_pos - l_neg) / used_len)
 
@@ -1749,6 +2110,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             defect_edges_x_shot = np.concatenate([pos_x, neg_x, np.asarray(corrected_x, dtype=float)]).astype(float)
             if defect_edges_x_shot.size > 1:
                 defect_edges_x_shot = np.unique(np.round(defect_edges_x_shot, 6))
+            start_sign_shot = _infer_start_sign_from_signed_walls(pos_x, neg_x)
             det_domain_balance_raw.append(
                 _domain_balance_in_used_region(
                     m_roi,
@@ -1756,6 +2118,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                     defect_edges_x_shot,
                     float(x_min_um_det),
                     float(x_max_um_det),
+                    start_sign=start_sign_shot,
                 )
             )
 
@@ -2053,27 +2416,124 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                 pass
             fig_raw.subplots_adjust(left=0.09, right=0.84, bottom=0.10, top=0.92)
             cax_raw = fig_raw.add_axes([0.90, 0.10, 0.018, 0.82])
+            raw_vmin = -1.0 if params.get('WATERFALL_MAG_CLIM') is None else params['WATERFALL_MAG_CLIM'][0]
+            raw_vmax = 1.0 if params.get('WATERFALL_MAG_CLIM') is None else params['WATERFALL_MAG_CLIM'][1]
             im_raw = ax_raw.imshow(
                 M_full,
                 aspect='auto',
                 cmap='RdBu',
-                vmin=-1.0 if params.get('WATERFALL_MAG_CLIM') is None else params['WATERFALL_MAG_CLIM'][0],
-                vmax=1.0 if params.get('WATERFALL_MAG_CLIM') is None else params['WATERFALL_MAG_CLIM'][1],
-                extent=[float(x_centers_um_det[0]), float(x_centers_um_det[-1]), float(len(M_full)), 1.0],
+                interpolation='nearest',
+                resample=False,
+                vmin=raw_vmin,
+                vmax=raw_vmax,
+                extent=[float(x_centers_um_det[0]), float(x_centers_um_det[-1]), float(len(M_full)) + 0.5, 0.5],
             )
             ax_raw.set_xlabel(r'$\mu m$')
             ax_raw.set_ylabel('shot index (ordered by det)')
             ax_raw.set_title(f'Raw magnetization waterfall ordered by ARPKZ_final_set_field (seqs: {seqs})')
             ax_raw.set_xlim(float(x_centers_um_det[0]), float(x_centers_um_det[-1]))
-            ax_raw.set_ylim(float(len(M_full)), 1.0)
+            ax_raw.set_ylim(float(len(M_full)) + 0.5, 0.5)
             ax_raw.set_autoscale_on(False)
-            ax_raw.axvline(x=float(x_min_um_det), color='k', linestyle='--', linewidth=1.0, alpha=0.7)
-            ax_raw.axvline(x=float(x_max_um_det), color='k', linestyle='--', linewidth=1.0, alpha=0.7)
+            ax_raw.axvline(x=float(x_min_um_det), color='lime', linestyle='--', linewidth=2.2, alpha=0.95)
+            ax_raw.axvline(x=float(x_max_um_det), color='lime', linestyle='--', linewidth=2.2, alpha=0.95)
+
+            det_x_pos_arr = np.asarray(det_defect_x_pos, dtype=float)
+            det_y_pos_arr = np.asarray(det_defect_y_pos, dtype=float)
+            det_x_neg_arr = np.asarray(det_defect_x_neg, dtype=float)
+            det_y_neg_arr = np.asarray(det_defect_y_neg, dtype=float)
+            det_x_corr_arr = np.asarray(det_defect_x_corr, dtype=float)
+            det_y_corr_arr = np.asarray(det_defect_y_corr, dtype=float)
+
+            def _plot_raw_identified_domain_binary_profile():
+                """Overlay a color-coded binary (±1) domain strip below each raw shot."""
+                if len(M_full) == 0:
+                    return
+                x_axis = np.asarray(x_centers_um_det, dtype=float)
+                if x_axis.size < 2:
+                    return
+                x_left = float(x_axis[0])
+                x_right = float(x_axis[-1])
+
+                # Inverted y-axis (N -> 1): add offset to draw visually below the shot row.
+                y_center_offset = 0.33
+                strip_thickness = 0.32
+                polys_bin, colors_bin = [], []
+                x_edges = np.arange(-0.5, M_full.shape[1], 1.0) * float(um_per_px)
+
+                for shot_idx in range(len(M_full)):
+                    y_shot = float(shot_idx + 1)
+                    walls = []
+                    walls_pos = np.asarray([], dtype=float)
+                    walls_neg = np.asarray([], dtype=float)
+                    if det_x_pos_arr.size > 0:
+                        walls_pos = np.asarray(det_x_pos_arr[np.isclose(det_y_pos_arr, y_shot, atol=1e-9, rtol=0.0)], dtype=float)
+                        walls.extend(walls_pos.tolist())
+                    if det_x_neg_arr.size > 0:
+                        walls_neg = np.asarray(det_x_neg_arr[np.isclose(det_y_neg_arr, y_shot, atol=1e-9, rtol=0.0)], dtype=float)
+                        walls.extend(walls_neg.tolist())
+                    if det_x_corr_arr.size > 0:
+                        walls.extend(det_x_corr_arr[np.isclose(det_y_corr_arr, y_shot, atol=1e-9, rtol=0.0)].tolist())
+
+                    if len(walls) > 0:
+                        walls = np.unique(np.round(np.asarray(walls, dtype=float), 6))
+                        walls = walls[(walls > x_left) & (walls < x_right)]
+                    else:
+                        walls = np.asarray([], dtype=float)
+
+                    edges = np.concatenate(([x_left], walls, [x_right]))
+                    if edges.size < 2:
+                        continue
+
+                    m_row = np.asarray(M_full[shot_idx], dtype=float)
+                    if walls.size > 0:
+                        left_mask = x_axis < float(walls[0])
+                        if not np.any(left_mask):
+                            left_mask = x_axis <= float(walls[0])
+                    else:
+                        left_mask = np.ones_like(x_axis, dtype=bool)
+
+                    sign_from_defect = _infer_start_sign_from_signed_walls(walls_pos, walls_neg)
+                    if sign_from_defect is not None:
+                        sign_val = float(sign_from_defect)
+                    else:
+                        used_mask_sign = (x_axis >= float(x_min_um_det)) & (x_axis <= float(x_max_um_det))
+                        avg_m = np.nanmean(m_row[used_mask_sign]) if np.any(used_mask_sign) else np.nanmean(m_row)
+                        sign_val = 1.0 if np.nan_to_num(avg_m, nan=0.0) > 0.0 else -1.0
+                    n_flips = np.searchsorted(walls, x_axis, side='right')
+                    row_bin = sign_val * ((-1.0) ** n_flips)
+                    used_mask = (x_axis >= float(x_min_um_det)) & (x_axis <= float(x_max_um_det))
+                    row_bin = np.where(used_mask, row_bin, 0.0)
+
+                    y0 = y_shot + y_center_offset - 0.5 * strip_thickness
+                    y1 = y_shot + y_center_offset + 0.5 * strip_thickness
+                    for j in range(M_full.shape[1]):
+                        polys_bin.append([
+                            (x_edges[j], y0),
+                            (x_edges[j + 1], y0),
+                            (x_edges[j + 1], y1),
+                            (x_edges[j], y1),
+                        ])
+                        colors_bin.append(float(row_bin[j]))
+
+                if len(polys_bin) > 0:
+                    coll_bin = PolyCollection(polys_bin, array=np.asarray(colors_bin, dtype=float), cmap='RdBu')
+                    coll_bin.set_clim(raw_vmin, raw_vmax)
+                    coll_bin.set_alpha(1.0)
+                    coll_bin.set_zorder(13)
+                    ax_raw.add_collection(coll_bin)
+
+                # Delineate each shot pair (main row + binary strip) with horizontal guides.
+                x_l = float(x_centers_um_det[0])
+                x_r = float(x_centers_um_det[-1])
+                for shot_idx in range(len(M_full) - 1):
+                    yv = float(shot_idx + 1)
+                    y_sep = yv + 0.50
+                    ax_raw.plot([x_l, x_r], [y_sep, y_sep], color='yellow', linestyle='--', linewidth=1.0, alpha=0.72, zorder=14)
 
             if len(det_defect_x_pos) > 0:
                 ax_raw.scatter(
-                    np.asarray(det_defect_x_pos, dtype=float),
-                    np.asarray(det_defect_y_pos, dtype=float),
+                    det_x_pos_arr,
+                    det_y_pos_arr,
                     c='blue',
                     s=16,
                     edgecolors='black',
@@ -2083,8 +2543,8 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                 )
             if len(det_defect_x_neg) > 0:
                 ax_raw.scatter(
-                    np.asarray(det_defect_x_neg, dtype=float),
-                    np.asarray(det_defect_y_neg, dtype=float),
+                    det_x_neg_arr,
+                    det_y_neg_arr,
                     c='red',
                     s=16,
                     edgecolors='black',
@@ -2094,8 +2554,8 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                 )
             if len(det_defect_x_corr) > 0:
                 ax_raw.scatter(
-                    np.asarray(det_defect_x_corr, dtype=float),
-                    np.asarray(det_defect_y_corr, dtype=float),
+                    det_x_corr_arr,
+                    det_y_corr_arr,
                     c='lime',
                     s=18,
                     edgecolors='black',
@@ -2116,6 +2576,8 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                     label='rejected peaks',
                 )
 
+            _plot_raw_identified_domain_binary_profile()
+
             if len(grouped_indices) > 0:
                 x_left = float(x_centers_um_det[0])
                 x_right = float(x_centers_um_det[-1])
@@ -2130,9 +2592,17 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                     y_center = 0.5 * (y_start + y_end)
                     centers.append(y_center)
 
-                    # Draw horizontal boundaries where this det block starts/ends.
-                    ax_raw.axhline(y_start, color='white', linestyle='-', linewidth=0.9, alpha=0.75)
-                    ax_raw.axhline(y_end, color='white', linestyle='-', linewidth=0.9, alpha=0.75)
+                    # Draw an empty horizontal separator between different detunings.
+                    # Skip the very first start boundary; keep separators only between blocks.
+                    if start > 0:
+                        sep_half_height = 0.42
+                        ax_raw.axhspan(
+                            y_start - sep_half_height,
+                            y_start + sep_half_height,
+                            facecolor='white',
+                            edgecolor='none',
+                            zorder=19,
+                        )
 
                     # Print det value inside the block.
                     ax_raw.text(
@@ -2162,7 +2632,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             cbar_raw.set_label('magnetization m')
 
     if plot_flags.get('evolution_plots', False) and scan == 'bubbles_evolution':
-        plot_evolution_analysis(y_final, y_axis_col, z_fluc_final, corr_final, M_final, params, um_per_px)
+        plot_evolution_analysis(y_final, y_axis_col, z_fluc_final, M_final, um_per_px)
 
     if plot_flags.get('main_waterfall', True):
         title_full = f"{title_base}\n{'AVERAGED' if average else 'UNIQUE'}\n(seqs: {seqs})"
@@ -2203,6 +2673,31 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             defect_thresholds=defect_thresholds_for_plot,
         )
 
+    # Clean waterfall for KZ_defect_analysis without defect markers
+    if scan == 'KZ_defect_analysis':
+        title_clean = f"{title_base} (clean, no markers)\n(seqs: {seqs})"
+        plot_main_waterfall(
+            M_final,
+            D_final,
+            y_final,
+            dy,
+            y_axis_label,
+            title_clean,
+            scan,
+            params,
+            plot_flags,
+            um_per_px,
+            average=average,
+            defect_points=None,
+            defect_points_pos=None,
+            defect_points_neg=None,
+            defect_points_corrected=None,
+            defect_points_rejected=None,
+            defect_counts=None,
+            defect_sequences=None,
+            defect_thresholds=None,
+        )
+
     if plot_flags.get('fluctuations_waterfall', False):
         y_fluc, sigma2_map = compute_fluctuation_sigma2_waterfall(
             M_full,
@@ -2220,6 +2715,19 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             fluc_title,
             params,
             um_per_px,
+        )
+
+    if plot_flags.get('used_region_density_fluctuations', False):
+        used_region_title = f"{title_base}\nDensity fluctuations in used region (density - shot avg)\n(seqs: {seqs})"
+        plot_used_region_density_fluctuations(
+            D_final,
+            y_final,
+            dy,
+            y_axis_label,
+            used_region_title,
+            params,
+            um_per_px,
+            mode_cfg=mode_cfg,
         )
 
     plt.show()

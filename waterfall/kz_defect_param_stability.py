@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.ndimage import gaussian_filter1d
+import defect_finding_lib as defect_lib
 
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -41,7 +42,7 @@ def _load_dataframe(cfg):
         year=hdf_cfg.get('year'),
         month=hdf_cfg.get('month'),
         day=hdf_cfg.get('day'),
-        include_lyse_live=today_flag,
+        include_lyse_live=False,
     )
 
     if df_orig is None:
@@ -76,7 +77,8 @@ def _prepare_profiles(df, lib, mode_cfg, params):
     constraints = mode_cfg.get('constraints', None)
     average = bool(mode_cfg.get('average', False))
 
-    um_per_px = lib.get_um_per_px(params)
+    modality_cfg = lib._resolve_modality(mode_cfg, params)
+    um_per_px = lib.get_um_per_px(params, camera_name_override=modality_cfg.get('camera_name'))
 
     df_subset = lib.filter_dataframe(df, seqs, constraints)
     y_axis_col, _ = lib.get_scan_config(scan)
@@ -84,8 +86,9 @@ def _prepare_profiles(df, lib, mode_cfg, params):
 
     good_mask = lib.get_valid_rows_mask(
         sorted_df,
-        params['BACK_CHECK_THRESHOLD'],
-        params['NTOT_CHECK_THRESHOLD'],
+        filter_cfg=mode_cfg.get('shot_filter', {}),
+        modality_cfg=modality_cfg,
+        data_origin=modality_cfg.get('data_origin', data_origin),
     )
     sorted_df = sorted_df[good_mask]
     if sorted_df.empty:
@@ -94,39 +97,22 @@ def _prepare_profiles(df, lib, mode_cfg, params):
     y_raw = sorted_df[y_axis_col].values
     grouped_y, grouped_indices = lib._build_group_indices(y_raw)
 
-    m1_lbl = (data_origin, 'm1_1d')
-    m2_lbl = (data_origin, 'm2_1d')
-    m1_unpacked, m2_unpacked, _ = lib.unpack_images(sorted_df, m1_lbl, m2_lbl)
-    if m1_unpacked is None:
-        raise RuntimeError('No images unpacked from dataframe.')
+    profile_inputs = lib.build_magnetization_inputs(sorted_df, mode_cfg, params, data_origin)
+    if profile_inputs is None:
+        raise RuntimeError('No valid magnetization profile columns found for selected modality.')
 
-    M_full, D_full, _, _ = lib.process_magnetization(
-        m1_unpacked,
-        m2_unpacked,
-        params['SIGMA_Z_LOCAL_AVG'],
-        params['SIGMA_Z_LOCAL_FLUCT'],
-        params['AUTOCORR_CENTER'],
-        params['AUTOCORR_WINDOW'],
-    )
+    M_full = profile_inputs['M_full']
+    D_full = profile_inputs['D_full']
 
     if average:
         if len(grouped_indices) == 0:
             raise RuntimeError('No groups found for averaging.')
 
-        m1_final = np.zeros((len(grouped_indices), m1_unpacked.shape[1]))
-        m2_final = np.zeros((len(grouped_indices), m2_unpacked.shape[1]))
+        M_final = np.zeros((len(grouped_indices), M_full.shape[1]))
+        D_final = np.zeros((len(grouped_indices), D_full.shape[1]))
         for i, idx in enumerate(grouped_indices):
-            m1_final[i] = np.mean(m1_unpacked[idx], axis=0)
-            m2_final[i] = np.mean(m2_unpacked[idx], axis=0)
-
-        M_final, D_final, _, _ = lib.process_magnetization(
-            m1_final,
-            m2_final,
-            params['SIGMA_Z_LOCAL_AVG'],
-            params['SIGMA_Z_LOCAL_FLUCT'],
-            params['AUTOCORR_CENTER'],
-            params['AUTOCORR_WINDOW'],
-        )
+            M_final[i] = np.mean(M_full[idx], axis=0)
+            D_final[i] = np.mean(D_full[idx], axis=0)
         y_final = grouped_y
     else:
         rep_indices = np.array([idx[0] for idx in grouped_indices if len(idx) > 0], dtype=int)
@@ -216,124 +202,28 @@ def detect_counts(profile_data, lib, defect_cfg):
     M_final = profile_data['M_final']
     y_final = profile_data['y_final']
     x_centers_um = profile_data['x_centers_um']
-    xmin_ind = profile_data['xmin_ind']
-    xmax_ind = profile_data['xmax_ind']
+    xmin_ind = int(profile_data['xmin_ind'])
+    xmax_ind = int(profile_data['xmax_ind'])
 
-    gauss_sigma = float(defect_cfg['gaussian_sigma'])
-    deriv_threshold_pos = float(defect_cfg['derivative_threshold_pos'])
-    deriv_threshold_neg = float(defect_cfg['derivative_threshold_neg'])
-    zero_crossing_min_distance_um = max(0.0, float(defect_cfg['zero_crossing_min_distance_um']))
-    peak_step_filter_enabled = bool(defect_cfg['peak_step_filter_enabled'])
-    peak_step_filter_window_px = max(1, int(defect_cfg['peak_step_filter_window_px']))
-    peak_step_filter_min_abs_delta_m = max(0.0, float(defect_cfg['peak_step_filter_min_abs_delta_m']))
-    min_same_sign_peak_distance_um = max(0.0, float(defect_cfg['min_same_sign_peak_distance_um']))
-
-    x_roi_um = x_centers_um[xmin_ind:xmax_ind + 1]
+    x_min_um = float(x_centers_um[xmin_ind])
+    x_max_um = float(x_centers_um[xmax_ind])
+    cfg = defect_lib.normalize_defect_config(defect_cfg)
 
     per_shot_counts = []
     corrected_total = 0
     rejected_total = 0
 
     for i, _ in enumerate(y_final):
-        m_sig = M_final[i]
-        if gauss_sigma > 0:
-            m_sig = gaussian_filter1d(m_sig, sigma=gauss_sigma)
-
-        d_sig = np.gradient(m_sig)
-        if d_sig.size < 3 or xmax_ind - xmin_ind < 2:
-            per_shot_counts.append(0)
-            continue
-
-        d_roi = d_sig[xmin_ind:xmax_ind + 1]
-        m_roi = m_sig[xmin_ind:xmax_ind + 1]
-
-        peak_pos_raw = _count_peak_indices_pos(d_roi, deriv_threshold_pos)
-        peak_neg_raw = _count_peak_indices_neg(d_roi, deriv_threshold_neg)
-
-        peak_pos_roi = []
-        peak_neg_roi = []
-        rejected_idx = []
-
-        for idxp in peak_pos_raw:
-            if peak_step_filter_enabled and not _passes_peak_step_filter(
-                m_roi,
-                idxp,
-                peak_step_filter_window_px,
-                peak_step_filter_min_abs_delta_m,
-            ):
-                rejected_idx.append(int(idxp))
-            else:
-                peak_pos_roi.append(int(idxp))
-
-        for idxn in peak_neg_raw:
-            if peak_step_filter_enabled and not _passes_peak_step_filter(
-                m_roi,
-                idxn,
-                peak_step_filter_window_px,
-                peak_step_filter_min_abs_delta_m,
-            ):
-                rejected_idx.append(int(idxn))
-            else:
-                peak_neg_roi.append(int(idxn))
-
-        peak_pos_roi, peak_pos_x = lib._merge_close_same_sign_peaks(
-            peak_pos_roi,
-            x_roi_um,
-            min_same_sign_peak_distance_um,
+        out_i = defect_lib.find_defects_in_profile(
+            M_final[i],
+            x_centers_um,
+            cfg,
+            x_min_um,
+            x_max_um,
         )
-        peak_neg_roi, peak_neg_x = lib._merge_close_same_sign_peaks(
-            peak_neg_roi,
-            x_roi_um,
-            min_same_sign_peak_distance_um,
-        )
-
-        peak_thr_x = np.concatenate([peak_pos_x, peak_neg_x]).astype(float)
-        kept_thr_x = peak_thr_x
-
-        events = []
-        for idxp in peak_pos_roi:
-            events.append((int(idxp), 'pos'))
-        for idxn in peak_neg_roi:
-            events.append((int(idxn), 'neg'))
-        events.sort(key=lambda e: e[0])
-
-        corrected_x_shot = []
-        j = 0
-        while j < len(events):
-            sign_j = events[j][1]
-            k = j
-            while k < len(events) and events[k][1] == sign_j:
-                k += 1
-            run = events[j:k]
-
-            if len(run) >= 2:
-                for p in range(len(run) - 1):
-                    i_start = int(run[p][0])
-                    i_end = int(run[p + 1][0])
-                    sign_pair = run[p][1]
-                    cx = _find_opposite_peak_x(
-                        d_roi,
-                        x_roi_um,
-                        sign_pair,
-                        i_start,
-                        i_end,
-                    )
-                    if cx is None:
-                        continue
-                    if peak_thr_x.size == 0:
-                        corrected_x_shot.append(float(cx))
-                        continue
-                    min_dist = float(np.min(np.abs(peak_thr_x - float(cx))))
-                    if min_dist >= zero_crossing_min_distance_um:
-                        corrected_x_shot.append(float(cx))
-            j = k
-
-        if len(corrected_x_shot) > 1:
-            corrected_x_shot = list(np.unique(np.round(np.asarray(corrected_x_shot, dtype=float), 6)))
-
-        per_shot_counts.append(int(len(kept_thr_x) + len(corrected_x_shot)))
-        corrected_total += len(corrected_x_shot)
-        rejected_total += len(rejected_idx)
+        per_shot_counts.append(int(out_i['count']))
+        corrected_total += int(len(out_i['corrected_x']))
+        rejected_total += int(len(out_i['rejected_x']))
 
     return {
         'counts': np.asarray(per_shot_counts, dtype=int),
@@ -552,11 +442,17 @@ def main(n_samples=300, seed=7):
     mode_cfg = dict(cfg.MODE_CONFIGS['KZ_defect_analysis'])
     if hasattr(cfg, 'SEQS') and cfg.SEQS is not None:
         mode_cfg['seqs'] = cfg.SEQS
+    mode_cfg['shot_filter'] = dict(getattr(cfg, 'SHOT_FILTER_CONFIG', {}))
+    mode_cfg['magnetization_modalities'] = dict(getattr(cfg, 'MAGNETIZATION_MODALITIES', {}))
+    mode_cfg['defect_analysis_global'] = dict(getattr(cfg, 'DEFECT_ANALYSIS_PARAMS', {}))
 
     if not mode_cfg.get('seqs'):
         raise RuntimeError('KZ_defect_analysis seqs is empty. Set SEQS in waterfall_config.py first.')
 
-    defect_cfg = dict(mode_cfg.get('defect_analysis', {}))
+    defect_cfg = dict(getattr(cfg, 'DEFECT_ANALYSIS_PARAMS', {}))
+    defect_cfg.update(mode_cfg.get('defect_analysis', {}))
+    defect_cfg.update(mode_cfg.get('defect_analysis_override', {}))
+    defect_cfg = defect_lib.normalize_defect_config(defect_cfg)
     required = [
         'gaussian_sigma',
         'derivative_threshold_pos',

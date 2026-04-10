@@ -15,10 +15,31 @@ bec_data_path = "/home/{}/NAS542_dataBEC2".format(username)
 
 def get_day_data(today = True, year = None, month = None, day = None, path =bec_data_path, bec = 2, include_lyse_live = True):
     if today:
-        current_time = datetime.datetime.now()
-        year = current_time.year
-        month = current_time.month
-        day = current_time.day 
+        print('today=True: loading only live lyse.data()')
+        out = lyse.data()
+        try:
+            n_before = len(out)
+            filepath_col = None
+            if hasattr(out, 'columns'):
+                for col in out.columns:
+                    if col == 'filepath':
+                        filepath_col = col
+                        break
+                    if isinstance(col, tuple) and len(col) > 0 and col[0] == 'filepath':
+                        filepath_col = col
+                        break
+
+            if filepath_col is not None:
+                out = out.drop_duplicates(subset=[filepath_col], keep='last')
+            else:
+                out = out[~out.index.duplicated(keep='last')]
+            n_after = len(out)
+            if n_after != n_before:
+                print(f"Deduplicated rows: {n_before} -> {n_after}")
+        except Exception as err:
+            print(f"Warning: could not deduplicate rows ({err})")
+        return out
+
     if year is None or month is None or day is None:
         print('Please specify year, month and day')
     month = str(month).zfill(2)
@@ -34,9 +55,13 @@ def get_day_data(today = True, year = None, month = None, day = None, path =bec_
     df_s = []
     for name in hdf_files:
         print(f'Loading: {name}')
-        df = pd.read_hdf(path + '/' + name)
-        print(f"  -> {len(df)} rows")
-        df_s.append(df)
+        try:
+            df = pd.read_hdf(path + '/' + name)
+            print(f"  -> {len(df)} rows")
+            df_s.append(df)
+        except (AttributeError, ValueError, KeyError) as e:
+            print(f"  WARNING: Failed to load {name}: {e}")
+            print(f"  -> Skipping this file")
     
     print(f"Loaded {len(df_s)} HDF files total")
     current_time = datetime.datetime.now()
@@ -58,8 +83,18 @@ def get_day_data(today = True, year = None, month = None, day = None, path =bec_
     # and live lyse dataframe.
     try:
         n_before = len(out)
-        if hasattr(out, 'columns') and 'filepath' in out.columns:
-            out = out.drop_duplicates(subset=['filepath'], keep='last')
+        filepath_col = None
+        if hasattr(out, 'columns'):
+            for col in out.columns:
+                if col == 'filepath':
+                    filepath_col = col
+                    break
+                if isinstance(col, tuple) and len(col) > 0 and col[0] == 'filepath':
+                    filepath_col = col
+                    break
+
+        if filepath_col is not None:
+            out = out.drop_duplicates(subset=[filepath_col], keep='last')
         else:
             out = out[~out.index.duplicated(keep='last')]
         n_after = len(out)

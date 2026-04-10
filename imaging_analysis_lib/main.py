@@ -191,7 +191,7 @@ def plot_OD(dict_images,key,cam,fig,ax,i,j):
         Z = ODlog
         #Z = rotate(Z,6.5,reshape=False)
         vmin = 0.
-        vmax = 1.5e14
+        vmax = 1.4e14
         cmap = 'gist_stern'
     if method == 'phase_contrast':
         Z = ODlog -1.
@@ -206,7 +206,7 @@ def plot_OD(dict_images,key,cam,fig,ax,i,j):
 
     fig_temp = ax[2*i,j+1].pcolormesh(X,Y,Z,vmin = vmin,vmax = vmax,cmap = cmap)
     cbar = fig.colorbar(fig_temp,ax=ax[2*i,j+1])
-    cbar.set_label('ln(I_in/I_out)',fontsize=fontsize_mine)
+    cbar.set_label('n2D [m$^{-2}$]',fontsize=fontsize_mine)
     rect = patches.Rectangle((roi_back_xmin,roi_back_ymin),roi_back_xmax-roi_back_xmin,roi_back_ymax-roi_back_ymin,linewidth=3,edgecolor='g',facecolor='none',linestyle='--')
     rect_int = patches.Rectangle((roi_int_xmin,roi_int_ymin),roi_int_xmax-roi_int_xmin,roi_int_ymax-roi_int_ymin,linewidth=3,edgecolor='b',facecolor='none',linestyle='--')
     ax[2*i,j+1].add_patch(rect)
@@ -330,15 +330,15 @@ def calculate_OD(atoms, probe, cam, back = None, roi_background=None,alpha = Non
 
         dict_infos = {'OD_log_bare_sum':OD_log_bare_sum,
                     'OD_lin_sum':OD_lin_sum,
-                    'N_atoms':N,
-                    'probe_norm_err':error_norm,
                     'OD_log_sum':OD_log_sum,
+                    'probe_norm_err':error_norm,
                     'cnt_rel_probe_back':cnt_probe_back,
                     'cnt_rel_atoms_back':cnt_atoms_back,
                     'cnt_rel_probe_sat':cnt_probe_sat,
                     'cnt_rel_atoms_sat':cnt_atoms_sat,
                     'flag_probe_sat':flag_probe_sat,
-                    'flag_atoms_sat':flag_atoms_sat
+                    'flag_atoms_sat':flag_atoms_sat,
+                    'N_atoms':N
                     }
         
     if method == 'phase_contrast':
@@ -347,7 +347,13 @@ def calculate_OD(atoms, probe, cam, back = None, roi_background=None,alpha = Non
         OD_log_bare = (np.array(atoms).clip(1)) / (np.array(probe).clip(1))
         n_2D = (OD_log_bare)
 
-        dict_infos = {}
+        dict_infos = {
+                    'probe_norm_err':error_norm,
+                    'cnt_rel_probe_back':cnt_probe_back,
+                    'cnt_rel_atoms_back':cnt_atoms_back,
+                    'cnt_rel_probe_sat':cnt_probe_sat,
+                    'cnt_rel_atoms_sat':cnt_atoms_sat,
+                    }
     
     return n_2D,dict_infos,OD_log_bare
 

@@ -264,8 +264,8 @@ def main(client, cameras,h5file):
     # Apply feedback correction
     new_profile = last_profile_y + KP * n1D_x_err_smooth
     min_inside = np.min(new_profile[ind_inside])
-    if min_inside < 0:
-        new_profile -= min_inside  # Shift up to ensure non-negativity in feedback region
+    if (min_inside-0.1) < 0:
+        new_profile -= (min_inside-0.1)  # Shift up to ensure non-negativity in feedback region
     new_profile[new_profile < 0.] = 0.
     
     # -------------------------------------------------------------------------

@@ -50,9 +50,12 @@ def _apply_recommended_center_if_enabled(cfg, mode_cfg):
             return mode_cfg
 
         out = dict(mode_cfg)
+        # Keep mode-level override for backward compatibility.
         current_defect = dict(out.get('defect_analysis', {}))
         current_defect.update(rec)
         out['defect_analysis'] = current_defect
+        # Also store explicit override key for the new global-defect-config workflow.
+        out['defect_analysis_override'] = dict(rec)
         print(f"Applied recommended_center from: {latest_path}")
         print(f"Updated defect_analysis keys: {sorted(list(rec.keys()))}")
         return out
@@ -80,7 +83,7 @@ if __name__ == "__main__":
                 year=hdf_cfg.get('year'),
                 month=hdf_cfg.get('month'),
                 day=hdf_cfg.get('day'),
-                include_lyse_live=today_flag,  # Load live lyse.data() only if today=True
+                include_lyse_live=False,  # Avoid double-counting shots (HDF day files already contain today's data)
             )
             
             if df_orig is None:
@@ -119,6 +122,12 @@ if __name__ == "__main__":
         mode_cfg = dict(cfg.MODE_CONFIGS[mode_name])
         if hasattr(cfg, 'SEQS') and cfg.SEQS is not None:
             mode_cfg['seqs'] = cfg.SEQS
+
+        # Inject shared configs into mode runtime payload.
+        mode_cfg['shot_filter'] = dict(getattr(cfg, 'SHOT_FILTER_CONFIG', {}))
+        mode_cfg['magnetization_modalities'] = dict(getattr(cfg, 'MAGNETIZATION_MODALITIES', {}))
+        mode_cfg['defect_analysis_global'] = dict(getattr(cfg, 'DEFECT_ANALYSIS_PARAMS', {}))
+
         mode_cfg = _apply_recommended_center_if_enabled(cfg, mode_cfg)
         lib.run_mode(df_orig, mode_cfg, cfg.PARAMS)
 

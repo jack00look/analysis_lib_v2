@@ -1,0 +1,36 @@
+# Quick Reference: Delete Last Correction
+
+## One-Line Summary
+Undo the last feedback correction, delete its file, and reload the profile without it.
+
+## Usage
+```bash
+python auto_feedback_update.py --delete-last
+```
+
+## What It Does
+1. Shows the last correction that will be deleted
+2. Asks for confirmation (type 'yes')
+3. Deletes the file from `magnetization_feedback/`
+4. Removes it from `feedback_sigmoids_list.py`
+5. Reloads and applies all *remaining* corrections
+6. Loads updated profile to DMD server
+
+## Example
+```bash
+# You added a correction with --delete-last behavior
+python auto_feedback_update.py --kp 1.0 --sigma 3.0
+
+# It made things worse. Undo it:
+python auto_feedback_update.py --delete-last
+
+# Confirm with: yes
+
+# Result: Profile goes back to state with 5 corrections instead of 6
+```
+
+## Related Commands
+- `python auto_feedback_update.py` - Add new correction
+- `python view_feedback_profiles.py` - View all corrections and diagnostics
+- `python auto_feedback_update.py --reset` - Delete ALL corrections
+- Manual edit `feedback_sigmoids_list.py` - Add/remove/reorder corrections

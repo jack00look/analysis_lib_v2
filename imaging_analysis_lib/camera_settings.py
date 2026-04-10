@@ -6,9 +6,7 @@ cameras = {
         'name': 'vert1',
         'method': 'absorption',
         'px_size': 1.019e-6,
-        #'px_size': 1,
         'alpha': 2.33,
-        #'chi_sat': 215e6,  old
         'chi_sat': 4.7e7, # updated 2026 Feb 03
         'pulse_time': 5e-6,
         'roi_back': np.s_[110:,-300:],
@@ -33,7 +31,7 @@ cameras = {
         'pulse_time': 5e-6,
         'roi_back': np.s_[100:200,300:500],
         'roi_integration': np.s_[66:73,:],
-        'atoms_images': ['PHC_m2', 'PHC_m1_1', 'PHC_m1_2' ,'PHC_0','PHC_p1'],
+        'atoms_images': ['PHC_1', 'PHC_2' ,'PHC_3','PHC_4'],
         'probe_image': 'PHC_probe',
         'background_image': 'PHC_back',
 

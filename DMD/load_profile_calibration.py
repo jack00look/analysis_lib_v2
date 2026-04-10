@@ -21,7 +21,7 @@ profile_dmd_y[x_center+DX-dx:x_center+DX+dx] = 0.
 # profile_dmd_y[x_center+2*DX-dx:x_center+2*DX+dx] = 0.
 # profile_dmd_y[x_center-3*DX-dx:x_center-3*DX+dx] = 0.
 # profile_dmd_y[x_center+3*DX-dx:x_center+3*DX+dx] = 0.
-# profile_dmd_y[x_center-dx:x_center+dx] = 0.
+#profile_dmd_y[x_center-dx:x_center+dx] = 1.
 
 client.load_1d_profile_dmd(profile_dmd_y.tolist())
 
