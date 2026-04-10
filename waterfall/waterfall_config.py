@@ -1,23 +1,23 @@
 import numpy as np
 
 # Set this to pick what to run in waterfall_FLAT_v4.py
-ACTIVE_MODE = 'ARP_Backward'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
+ACTIVE_MODE = 'KZ_det_scan'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
 # Optional override for sequence indices used by ACTIVE_MODE (set to None to use mode default)
 
 # If True, use recommended_center from the latest
 # results/kz_param_stability_safe_box_*.json.
 RECOMMENDED_CENTER = False
 
-SEQS = [37]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
+SEQS = [43,44,45,46,47]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
 
 # -------------------------
 # HDF Data Configuration
 # -------------------------
 HDF_CONFIG = {
-    'today': True,  # Set to False to load HDF from a previous day
+    'today': False,  # Set to False to load HDF from a previous day
     'year': 2026,   # Set if today=False (e.g., 2026)
     'month': 3,  # Set if today=False (e.g., 3 for March)
-    'day': 20,    # Set if today=False (e.g., 17)
+    'day': 24,    # Set if today=False (e.g., 17)
 }
 
 # -------------------------
@@ -31,7 +31,7 @@ PARAMS = {
     'X_MAX_INTEGRATION': 1200,
     'NUM_SECTIONS': 300,
     # Set to None for autoscale
-    'WATERFALL_MAG_CLIM': (-.1, .8),
+    'WATERFALL_MAG_CLIM': (-1., 1.),
     'WATERFALL_DENSITY_CLIM': None,
 }
 
@@ -70,12 +70,12 @@ MAGNETIZATION_MODALITIES = {
         # n1D_m1' = a1*n1D_m1 + b1*n1D_m2 + c1
         # n1D_m2' = a2*n1D_m2 + b2*n1D_m1 + c2
         'affine_correction': {
-            'a1': 1.,#1.43/1.07,
+            'a1': 1./2.4,#1.43/1.07,
             'b1': 0.0,
-            'c1': 0.,#-0.3E8*1.43/1.07,#-0.47e8,
-            'a2': 1.,#0.65/0.38,
+            'c1': -1.7*(1./2.4)*1e9,#-0.3E8*1.43/1.07,#-0.47e8,
+            'a2': 1./0.9,#0.65/0.38,
             'b2': 0.0,
-            'c2': 0.,#-0.7E8,#-0.76e8*0.65/0.38,
+            'c2': -2.5*(1./0.9)*1e9,#-0.7E8,#-0.76e8*0.65/0.38,
         },
         # Optional explicit labels (if None, library auto-detects columns)
         'm1_column': None,
@@ -98,7 +98,7 @@ MAGNETIZATION_MODALITIES = {
 # -------------------------
 DEFECT_ANALYSIS_PARAMS = {
     # 1) Signal preprocessing
-    'gaussian_sigma': 0.3,                 # Gaussian smoothing sigma (pixels)
+    'gaussian_sigma': 1.5,                 # Gaussian smoothing sigma (pixels)
 
     # 2) Peak detection on dM/dx
     'derivative_threshold': 0.0,           # Backward-compatible base magnitude
@@ -110,10 +110,10 @@ DEFECT_ANALYSIS_PARAMS = {
     # Rejected peaks are marked with black crosses and not counted.
     'peak_step_filter_enabled': True,
     'peak_step_filter_window_px': 4,
-    'peak_step_filter_min_abs_delta_m': 0.3,
+    'peak_step_filter_min_abs_delta_m': 0.4,
 
     # 4) Geometric cleanup and correction
-    'min_same_sign_peak_distance_um': 7.0,  # merge same-sign peaks closer than this
+    'min_same_sign_peak_distance_um': 10.0,  # merge same-sign peaks closer than this
     'zero_crossing_min_distance_um': 3.0,   # min distance from kept threshold peaks for corrected defects
 
     # 5) Histogram control

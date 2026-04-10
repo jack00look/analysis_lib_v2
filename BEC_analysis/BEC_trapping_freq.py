@@ -14,11 +14,11 @@ if __name__ == '__main__':
     try:
         df = general_lib_lyse_mod.get_day_data(today = True)
 
-        seqs = [11]
+        seqs = [47]
         x_var = 'hold_time_debug'
         y_var = ('BEC_fit_hor', 'atomsyfit_c_tf')
 
-        f_init = 2 #kHz
+        f_init = 3. #kHz
 
         df = df[(df['sequence_index'].isin(seqs))]
 

@@ -48,7 +48,29 @@ def _count_peak_indices_neg(d_signal, threshold):
 	return np.where(local_min & below)[0] + 1
 
 
-def _merge_close_same_sign_peaks(peak_idx, x_axis_um, min_sep_um):
+def _merge_close_same_sign_peaks(peak_idx, x_axis_um, min_sep_um, opposite_peaks=None):
+	"""
+	Merge peaks of the same sign if they are closer than min_sep_um.
+	Only merge if there is NO opposite-sign peak between them.
+	
+	Parameters:
+	-----------
+	peak_idx : array-like
+		Indices of peaks to potentially merge
+	x_axis_um : array-like
+		Position axis in micrometers
+	min_sep_um : float
+		Minimum separation for merging
+	opposite_peaks : array-like, optional
+		Positions (in um) of opposite-sign peaks. Peaks separated by opposite-sign peaks won't merge.
+	
+	Returns:
+	--------
+	merged_idx : ndarray
+		Merged peak indices
+	merged_x : ndarray
+		Merged peak positions in um
+	"""
 	idx = np.asarray(peak_idx, dtype=int)
 	x_axis_um = np.asarray(x_axis_um, dtype=float)
 	if idx.size == 0:
@@ -57,6 +79,12 @@ def _merge_close_same_sign_peaks(peak_idx, x_axis_um, min_sep_um):
 	idx = np.unique(np.sort(idx))
 	if float(min_sep_um) <= 0:
 		return idx, x_axis_um[idx]
+	
+	# Convert opposite peaks to array if provided
+	if opposite_peaks is not None:
+		opposite_peaks = np.asarray(opposite_peaks, dtype=float)
+	else:
+		opposite_peaks = np.array([], dtype=float)
 
 	merged_idx = []
 	merged_x = []
@@ -64,10 +92,22 @@ def _merge_close_same_sign_peaks(peak_idx, x_axis_um, min_sep_um):
 	cluster = [int(idx[0])]
 	for ii in idx[1:]:
 		ii = int(ii)
-		if abs(float(x_axis_um[ii]) - float(x_axis_um[cluster[-1]])) < float(min_sep_um):
-			cluster.append(ii)
-			continue
+		x_ii = float(x_axis_um[ii])
+		x_prev = float(x_axis_um[cluster[-1]])
+		
+		# Check if close enough to potentially merge
+		if abs(x_ii - x_prev) < float(min_sep_um):
+			# Check if there's an opposite-sign peak between them
+			x_start = min(x_prev, x_ii)
+			x_end = max(x_prev, x_ii)
+			has_opposite_between = np.any((opposite_peaks > x_start) & (opposite_peaks < x_end))
+			
+			if not has_opposite_between:
+				# Safe to merge
+				cluster.append(ii)
+				continue
 
+		# Not close or blocked by opposite peak - finalize current cluster
 		if len(cluster) == 1:
 			i0 = int(cluster[0])
 			merged_idx.append(i0)
@@ -81,6 +121,7 @@ def _merge_close_same_sign_peaks(peak_idx, x_axis_um, min_sep_um):
 			merged_x.append(float(xmid))
 		cluster = [ii]
 
+	# Finalize last cluster
 	if len(cluster) == 1:
 		i0 = int(cluster[0])
 		merged_idx.append(i0)
@@ -215,11 +256,13 @@ def find_defects_in_profile(m_profile, x_axis_um, defect_cfg, x_min_um, x_max_um
 		peak_pos_roi,
 		x_roi_um,
 		cfg['min_same_sign_peak_distance_um'],
+		opposite_peaks=x_roi_um[peak_neg_roi] if len(peak_neg_roi) > 0 else None,
 	)
 	peak_neg_roi, peak_neg_x = _merge_close_same_sign_peaks(
 		peak_neg_roi,
 		x_roi_um,
 		cfg['min_same_sign_peak_distance_um'],
+		opposite_peaks=x_roi_um[peak_pos_roi] if len(peak_pos_roi) > 0 else None,
 	)
 
 	peak_thr_x = np.concatenate([peak_pos_x, peak_neg_x]).astype(float)
