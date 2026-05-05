@@ -10,11 +10,11 @@ cameras = {
         'chi_sat': 4.7e7, # updated 2026 Feb 03
         'pulse_time': 5e-6,
         'roi_back': np.s_[110:,-300:],
-        'roi_integration': np.s_[:,:],
+        'roi_integration': np.s_[50:85,:],
         'atoms_images': ['PTAI_m2', 'PTAI_m1','PTAI_0','PTAI_p1'],
         'probe_image': 'PTAI_probe',
         'background_image': 'PTAI_back',
-        'dynamic_range': 10000,#2**16,
+        'dynamic_range': 65000,#2**16,
         'roi': np.s_[:, :],
         'axis_matrix': np.array([[1, 0], [0, 1],[0, 0]])
         },
@@ -35,7 +35,7 @@ cameras = {
         'probe_image': 'PHC_probe',
         'background_image': 'PHC_back',
 
-        'dynamic_range': 1000, #60000, #2**16, 
+        'dynamic_range': 65000, #60000, #2**16, 
         'roi': np.s_[:, :],
         'axis_matrix': np.array([[1, 0], [0, 1],[0, 0]])
         },

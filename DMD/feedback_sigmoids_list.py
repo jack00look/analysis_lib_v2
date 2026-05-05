@@ -30,63 +30,35 @@ SIGMOID_PROFILES = [
     
     {
         'filename': 'sigmoid_center_interpolation_update_0.txt',
-        'kp': 0.8,
-        'smoothing_sigma': 2.0,
+        'kp': 0.3,
+        'smoothing_sigma': 1.0,
         'description': 'Auto-added from waterfall',
     },
     
     {
         'filename': 'sigmoid_center_interpolation_update_1.txt',
-        'kp': 0.5,
+        'kp': 0.2,
         'smoothing_sigma': 1.0,
         'description': 'Auto-added from waterfall',
     },
     
     {
         'filename': 'sigmoid_center_interpolation_update_2.txt',
-        'kp': 0.5,
+        'kp': 0.4,
         'smoothing_sigma': 1.0,
         'description': 'Auto-added from waterfall',
     },
     
     {
         'filename': 'sigmoid_center_interpolation_update_3.txt',
-        'kp': 0.5,
+        'kp': 0.3,
         'smoothing_sigma': 1.0,
         'description': 'Auto-added from waterfall',
     },
     
     {
         'filename': 'sigmoid_center_interpolation_update_4.txt',
-        'kp': 0.5,
-        'smoothing_sigma': 1.0,
-        'description': 'Auto-added from waterfall',
-    },
-    
-    {
-        'filename': 'sigmoid_center_interpolation_update_5.txt',
-        'kp': 0.5,
-        'smoothing_sigma': 1.0,
-        'description': 'Auto-added from waterfall',
-    },
-    
-    {
-        'filename': 'sigmoid_center_interpolation_update_6.txt',
-        'kp': 0.5,
-        'smoothing_sigma': 1.0,
-        'description': 'Auto-added from waterfall',
-    },
-    
-    {
-        'filename': 'sigmoid_center_interpolation_update_7.txt',
-        'kp': 0.5,
-        'smoothing_sigma': 1.0,
-        'description': 'Auto-added from waterfall',
-    },
-    
-    {
-        'filename': 'sigmoid_center_interpolation_update_8.txt',
-        'kp': 0.5,
+        'kp': 0.3,
         'smoothing_sigma': 1.0,
         'description': 'Auto-added from waterfall',
     },

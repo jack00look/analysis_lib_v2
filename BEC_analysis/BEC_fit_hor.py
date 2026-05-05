@@ -3,7 +3,7 @@ import traceback
 import importlib
 import matplotlib.pyplot as plt
 import numpy as np
-from fitting.models1D import ThomasFermi1DModel, Bimodal1DModel, Gaussian1DModel,J_BimodalBose1DModel2Centers
+from fitting.models1D import ThomasFermi1DModel, Bimodal1DModel, Gaussian1DModel,J_BimodalBose1DModel2Centers,J_BimodalBose1DModel2Centers_FlatTop
 from lmfit_lyse_interface import parameters_dict_with_errors
 from lmfit import minimize, Parameters
 import scipy.ndimage
@@ -22,8 +22,8 @@ cameras = camera_settings.cameras
 cam_name = 'cam_vert1'
 keys = ['PTAI_m1']#,'PTAI_m2']
 
-cam_name = 'cam_hor1'
-keys = ['atoms']
+# cam_name = 'cam_hor1'
+# keys = ['atoms']
 
 
 
@@ -42,8 +42,31 @@ def BEC_fit_hor(h5file,show=True):
     for i,key in enumerate(keys):
         # get the image and the ODlog image for the key
         n2D,n1D_x,n1D_y,x_vals,y_vals = imaging_analysis_lib_mod.extract_images_parts(dict_images,cam,key)
-
+        roi_int = cam['roi_integration']
+        roi_int_ymin, roi_int_ymax, roi_int_xmin, roi_int_xmax = roi_int[0].start, roi_int[0].stop, roi_int[1].start, roi_int[1].stop
+        print(f'roi_int_xmin: {roi_int_xmin}, roi_int_xmax: {roi_int_xmax}, roi_int_ymin: {roi_int_ymin}, roi_int_ymax: {roi_int_ymax}')
         # plot the image do the fits
+        n1D_x = np.sum(n2D[roi_int_ymin:roi_int_ymax, :],axis=0)*cam['px_size']
+        n1D_y = np.sum(n2D[:, roi_int_xmin:roi_int_xmax],axis=1)*cam['px_size']
+        imaging_analysis_lib_mod.plot_OD(dict_images,key,cam,fig,ax,2*i,0)
+        out_x = imaging_analysis_lib_mod.do_fit_1D(n1D_x,x_vals,J_BimodalBose1DModel2Centers_FlatTop,key + 'xfit_',ax[2*i+1,1])
+        out_y = imaging_analysis_lib_mod.do_fit_1D(n1D_y,y_vals,J_BimodalBose1DModel2Centers_FlatTop,key + 'yfit_',ax[2*i,0],invert=True)
+
+        # get the parameters from the fits in a dictionary
+        dict.update(out_x.params.valuesdict())
+        dict.update(out_y.params.valuesdict())
+
+    fig,ax = plt.subplots(2*len(keys),2,figsize=(10*len(keys),10),constrained_layout=True)
+    dict = {}
+    for i,key in enumerate(keys):
+        # get the image and the ODlog image for the key
+        n2D,n1D_x,n1D_y,x_vals,y_vals = imaging_analysis_lib_mod.extract_images_parts(dict_images,cam,key)
+        roi_int = cam['roi_integration']
+        roi_int_ymin, roi_int_ymax, roi_int_xmin, roi_int_xmax = roi_int[0].start, roi_int[0].stop, roi_int[1].start, roi_int[1].stop
+        print(f'roi_int_xmin: {roi_int_xmin}, roi_int_xmax: {roi_int_xmax}, roi_int_ymin: {roi_int_ymin}, roi_int_ymax: {roi_int_ymax}')
+        # plot the image do the fits
+        n1D_x = np.sum(n2D[roi_int_ymin:roi_int_ymax, :],axis=0)*cam['px_size']
+        n1D_y = np.sum(n2D[:, roi_int_xmin:roi_int_xmax],axis=1)*cam['px_size']
         imaging_analysis_lib_mod.plot_OD(dict_images,key,cam,fig,ax,2*i,0)
         out_x = imaging_analysis_lib_mod.do_fit_1D(n1D_x,x_vals,J_BimodalBose1DModel2Centers,key + 'xfit_',ax[2*i+1,1])
         out_y = imaging_analysis_lib_mod.do_fit_1D(n1D_y,y_vals,J_BimodalBose1DModel2Centers,key + 'yfit_',ax[2*i,0],invert=True)

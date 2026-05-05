@@ -24,10 +24,10 @@ FLAG_DATASET = RESULTS_GROUP + '/dmd_profile_updated'
 SCRIPT_ARGS = {
     'year': 2026,
     'month': 4,
-    'day': 9,
-    'sequence': 5,
+    'day': 13,
+    'sequence': 9,
     'it': 0,
-    'rep': 42,
+    'rep': 0,
 }
 
 

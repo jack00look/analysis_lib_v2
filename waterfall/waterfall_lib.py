@@ -626,9 +626,19 @@ def process_profiles(m, d, sigma_avg, sigma_fluct):
     m = np.nan_to_num(np.clip(m, -1, 1), nan=0.0)
     d = np.nan_to_num(np.clip(d, 0, None), nan=0.0)
 
-    local_avg = gaussian_filter1d(m, sigma=sigma_avg, axis=1)
+    # Handle zero sigma: use minimal smoothing to avoid identically zero residuals
+    if sigma_avg > 0:
+        local_avg = gaussian_filter1d(m, sigma=sigma_avg, axis=1)
+    else:
+        # Use minimal smoothing (0.5) instead of raw m to avoid pw = m - m = 0
+        local_avg = gaussian_filter1d(m, sigma=0.5, axis=1)
+    
     pw = m - local_avg
-    local_fluct = gaussian_filter1d(np.abs(pw), sigma=sigma_fluct, axis=1)
+    
+    if sigma_fluct > 0:
+        local_fluct = gaussian_filter1d(np.abs(pw), sigma=sigma_fluct, axis=1)
+    else:
+        local_fluct = np.abs(pw)
 
     return m, d, local_fluct
 
@@ -732,9 +742,13 @@ def compute_fluctuation_sigma2_waterfall(M_shots, y_raw, sigma_fluct, sigma_avg)
     """
     Compute per-scan-point averaged local fluctuation profile:
       1) average magnetization profile over shots in each scan value
-      2) compute shot residuals to this average
-      3) compute local sigma^2 profile from residuals (smoothed delta^2)
-      4) average sigma^2 over shots at the same scan value
+      2) compute shot residuals to this average (ensemble fluctuations)
+      3) compute local sigma^2 profile from squared residuals
+      4) smooth with sigma_fluct if > 0
+      5) average sigma^2 over shots at the same scan value
+    
+    Note: sigma_fluct is applied to smooth the squared residuals. 
+          If sigma_fluct <= 0, use a minimal smoothing (sigma=0.5) to avoid pure pixel noise.
     """
     y_group_vals, groups = _build_group_indices(y_raw)
     if len(groups) == 0:
@@ -742,6 +756,9 @@ def compute_fluctuation_sigma2_waterfall(M_shots, y_raw, sigma_fluct, sigma_avg)
 
     n_x = M_shots.shape[1]
     sigma2_map = np.zeros((len(groups), n_x))
+    
+    # Use minimal smoothing if sigma_fluct <= 0 to avoid pure pixel noise
+    sigma_fluct_eff = sigma_fluct if sigma_fluct > 0 else 0.5
 
     for i, idx in enumerate(groups):
         if len(idx) == 0:
@@ -752,25 +769,52 @@ def compute_fluctuation_sigma2_waterfall(M_shots, y_raw, sigma_fluct, sigma_avg)
             # Ensemble fluctuations at fixed scan value: m - <m>
             m_avg = np.mean(m_group, axis=0)
             delta = m_group - m_avg[None, :]
-            local_sigma2_each = gaussian_filter1d(delta ** 2, sigma=sigma_fluct, axis=1)
+            delta_sq = delta ** 2
+            # Average delta^2 across reps FIRST, then smooth once
+            avg_delta_sq = np.mean(delta_sq, axis=0)
+            local_sigma2 = gaussian_filter1d(avg_delta_sq, sigma=sigma_fluct_eff, axis=0)
+            sigma2_map[i] = local_sigma2
         else:
-            # Single-shot fallback: use spatial fluctuations around local trend,
-            # otherwise m - <m> is identically zero for one sample.
-            local_trend = gaussian_filter1d(m_group, sigma=sigma_avg, axis=1)
+            # Single-shot fallback: use spatial fluctuations around local trend
+            if sigma_avg > 0:
+                local_trend = gaussian_filter1d(m_group, sigma=sigma_avg, axis=1)
+            else:
+                # If no sigma_avg, use minimal smoothing for the trend
+                local_trend = gaussian_filter1d(m_group, sigma=0.5, axis=1)
             delta = m_group - local_trend
-            local_sigma2_each = gaussian_filter1d(delta ** 2, sigma=sigma_fluct, axis=1)
-
-        sigma2_map[i] = np.mean(local_sigma2_each, axis=0)
+            delta_sq = delta ** 2
+            # Average delta^2 across reps (single rep), then smooth
+            avg_delta_sq = np.mean(delta_sq, axis=0)
+            local_sigma2 = gaussian_filter1d(avg_delta_sq, sigma=sigma_fluct_eff, axis=0)
+            sigma2_map[i] = local_sigma2
 
     return y_group_vals, sigma2_map
 
 
-def plot_fluctuations_waterfall(sigma2_map, y_vals, dy, y_axis_label, title, params, um_per_px):
-    """Plot local fluctuation sigma^2 as a waterfall map."""
+def plot_fluctuations_waterfall(sigma2_map, y_vals, dy, y_axis_label, title, params, um_per_px, mode_cfg=None, dw_fit_coeffs=None, dw_fit_x=None, dw_fit_t=None):
+    """Plot local fluctuation sigma^2 as a waterfall map.
+    
+    If params contains DOMAIN_WALL_X_MIN and DOMAIN_WALL_X_MAX, add a side plot showing
+    fluctuation profiles at 5 x-positions, shifted by domain wall crossing time.
+    
+    Domain wall fit (dw_fit_coeffs, dw_fit_x, dw_fit_t) can be provided to shift profiles
+    so peaks align based on when the domain wall reaches each x-position.
+    """
     if sigma2_map.size == 0 or len(y_vals) == 0:
         return
 
-    fig, ax = plt.subplots(figsize=(8, 5), tight_layout=True)
+    # Check if we should add the side profile plot based on params
+    add_profile_plot = False
+    if params and isinstance(params, dict):
+        x_min_dw = params.get('DOMAIN_WALL_X_MIN', None)
+        x_max_dw = params.get('DOMAIN_WALL_X_MAX', None)
+        add_profile_plot = (x_min_dw is not None and x_max_dw is not None)
+    
+    if add_profile_plot:
+        fig, (ax, ax_profile) = plt.subplots(1, 2, figsize=(14, 5), tight_layout=True)
+    else:
+        fig, ax = plt.subplots(figsize=(8, 5), tight_layout=True)
+    
     x_plot_px = np.arange(-0.5, sigma2_map.shape[1], 1)
     x_plot_um = x_plot_px * um_per_px
 
@@ -812,13 +856,182 @@ def plot_fluctuations_waterfall(sigma2_map, y_vals, dy, y_axis_label, title, par
 
     ax.axvline(x=x_min_um, color='lime', linestyle='--', linewidth=2.0, alpha=0.95)
     ax.axvline(x=x_max_um, color='lime', linestyle='--', linewidth=2.0, alpha=0.95)
-    x_plot_m = x_plot_um * 1e-6
-    ax.set_xlim(x_plot_m[0], x_plot_m[-1])
+    # Clip to used region in x
+    ax.set_xlim(x_min_um, x_max_um)
     ax.set_ylim(np.min(y_vals) - dy, np.max(y_vals) + dy)
     ax.set_ylabel(y_axis_label)
     ax.set_xlabel('x [μm]')
     ax.set_title(title)
-    plt.colorbar(coll, ax=ax, label=r'Local $\sigma^2$ of $m - \langle m \rangle$')
+    cbar = plt.colorbar(coll, ax=ax, label=r'Local $\sigma^2$ of $m - \langle m \rangle$')
+    
+    # Add side plot with profiles at 3 x-positions if domain wall bounds are set
+    if add_profile_plot:
+        x_min_dw = params.get('DOMAIN_WALL_X_MIN')
+        x_max_dw = params.get('DOMAIN_WALL_X_MAX')
+        x_q1_dw = x_min_dw + (x_max_dw - x_min_dw) / 4.0
+        x_mid_dw = (x_min_dw + x_max_dw) / 2.0
+        x_q3_dw = x_min_dw + 3 * (x_max_dw - x_min_dw) / 4.0
+        
+        x_positions = [x_min_dw, x_q1_dw, x_mid_dw, x_q3_dw, x_max_dw]
+        colors_profile = ['blue', 'cyan', 'green', 'orange', 'red']
+        labels_profile = [f'x={x_min_dw}μm', f'x={x_q1_dw:.1f}μm', f'x={x_mid_dw:.1f}μm', f'x={x_q3_dw:.1f}μm', f'x={x_max_dw}μm']
+        
+        # Draw colored vertical lines in main plot at profile positions
+        for x_pos, color in zip(x_positions, colors_profile):
+            ax.axvline(x=x_pos, color=color, linestyle='-', linewidth=1.5, alpha=0.7)
+        
+        # Compute shifts based on domain wall fit
+        shifts = {}
+        print(f"DEBUG: dw_fit_coeffs={dw_fit_coeffs}, dw_fit_t={dw_fit_t is not None}, dw_fit_x={dw_fit_x is not None}")
+        if dw_fit_coeffs is not None and dw_fit_t is not None and dw_fit_x is not None:
+            # Linear fit: t(x) = a*x + b, where x is in meters and t is in bubbles_time units
+            # dw_fit_coeffs = [a, b] from polyfit(x_in_meters, t)
+            a, b = dw_fit_coeffs if len(dw_fit_coeffs) >= 2 else (1.0, 0.0)
+            print(f"DEBUG: Using fit equation: bubbles_time = {a:.6e} * x_m + {b:.6f}")
+            print(f"DEBUG: Or in μm: bubbles_time = {a*1e-6:.6e} * x_um + {b:.6f}")
+            for x_pos in x_positions:
+                # x_pos is in micrometers, convert to meters
+                x_pos_m = x_pos * 1e-6
+                # Use fit equation: t = a*x + b
+                t_cross = a * x_pos_m + b
+                shifts[x_pos] = t_cross
+                print(f"DEBUG:   x={x_pos} μm: bubbles_time_offset={t_cross:.3f}")
+        else:
+            print(f"DEBUG: No fit data, no shift")
+            # No fit data, no shift
+            for x_pos in x_positions:
+                shifts[x_pos] = 0.0
+        
+        for x_pos, color, label in zip(x_positions, colors_profile, labels_profile):
+            # Find closest x index
+            x_ind = int(np.argmin(np.abs(x_centers_um - x_pos)))
+            if 0 <= x_ind < sigma2_map.shape[1]:
+                # Shift y_vals (bubbles_time) by the offset at this x position
+                y_shifted = y_vals - shifts[x_pos]
+                print(f"DEBUG: Plotting {label}, shift={shifts[x_pos]:.3f}, y_shifted range=[{y_shifted.min():.2f}, {y_shifted.max():.2f}]")
+                ax_profile.plot(y_shifted, sigma2_map[:, x_ind], 'o-', color=color, label=label, linewidth=2)
+        
+        ax_profile.set_xlabel(f'{y_axis_label} (shifted by DW crossing time)')
+        ax_profile.set_ylabel(r'Local $\sigma^2$ of $m - \langle m \rangle$')
+        ax_profile.set_title('Fluctuation profiles (shifted by DW position)')
+        ax_profile.legend()
+        ax_profile.grid(True, alpha=0.3)
+        
+        # Perform exponential decay fits for y_shifted > 0
+        from scipy.optimize import curve_fit
+        
+        def exp_decay(y, A, tau):
+            """Exponential decay: A * exp(-y/tau), goes to zero at infinity"""
+            return A * np.exp(-y / tau)
+        
+        tau_values_5pos = []
+        tau_errors_5pos = []
+        x_positions_for_tau_5pos = []
+        
+        # First fit the 5 specific positions and show fits on the plot
+        for x_pos, color, label in zip(x_positions, colors_profile, labels_profile):
+            x_ind = int(np.argmin(np.abs(x_centers_um - x_pos)))
+            if 0 <= x_ind < sigma2_map.shape[1]:
+                y_shifted = y_vals - shifts[x_pos]
+                fluct_vals = sigma2_map[:, x_ind]
+                
+                # Select only positive shifted times
+                mask = y_shifted > 0
+                if np.sum(mask) >= 3:  # Need at least 3 points
+                    y_fit = y_shifted[mask]
+                    f_fit = fluct_vals[mask]
+                    
+                    try:
+                        # Initial guess
+                        A_guess = np.max(f_fit)
+                        tau_guess = (y_fit.max() - y_fit.min()) / 3
+                        p0 = [A_guess, tau_guess]
+                        
+                        # Fit
+                        popt, pcov = curve_fit(exp_decay, y_fit, f_fit, p0=p0, maxfev=5000)
+                        tau = popt[1]
+                        tau_err = np.sqrt(pcov[1, 1])
+                        
+                        tau_values_5pos.append(tau)
+                        tau_errors_5pos.append(tau_err)
+                        x_positions_for_tau_5pos.append(x_pos)
+                        
+                        print(f"DEBUG: {label} - tau = {tau:.3f} ± {tau_err:.3f}")
+                        
+                        # Plot fitted curve on the profile plot
+                        y_fit_smooth = np.linspace(y_fit.min(), y_fit.max(), 100)
+                        f_fit_smooth = exp_decay(y_fit_smooth, *popt)
+                        ax_profile.plot(y_fit_smooth, f_fit_smooth, '--', color=color, linewidth=2, alpha=0.7)
+                        
+                    except Exception as e:
+                        print(f"DEBUG: Fit failed for {label}: {e}")
+        
+        # Now fit all pixels in the domain wall region
+        x_min_dw_m = params.get('DOMAIN_WALL_X_MIN', 960) * 1e-6
+        x_max_dw_m = params.get('DOMAIN_WALL_X_MAX', 1070) * 1e-6
+        x_min_dw_um = params.get('DOMAIN_WALL_X_MIN', 960)
+        x_max_dw_um = params.get('DOMAIN_WALL_X_MAX', 1070)
+        
+        # Find x indices for domain wall region
+        x_min_ind = int(np.argmin(np.abs(x_centers_um - x_min_dw_um)))
+        x_max_ind = int(np.argmin(np.abs(x_centers_um - x_max_dw_um)))
+        if x_max_ind < x_min_ind:
+            x_min_ind, x_max_ind = x_max_ind, x_min_ind
+        
+        tau_all = []
+        tau_err_all = []
+        x_all = []
+        
+        for x_ind in range(x_min_ind, x_max_ind + 1):
+            x_um = x_centers_um[x_ind]
+            # Get shift for this x position
+            if dw_fit_coeffs is not None:
+                x_m = x_um * 1e-6
+                a, b = dw_fit_coeffs
+                shift = a * x_m + b
+            else:
+                shift = 0.0
+            
+            y_shifted = y_vals - shift
+            fluct_vals = sigma2_map[:, x_ind]
+            
+            # Select only positive shifted times
+            mask = y_shifted > 0
+            if np.sum(mask) >= 3:
+                y_fit = y_shifted[mask]
+                f_fit = fluct_vals[mask]
+                
+                try:
+                    # Initial guess
+                    A_guess = np.max(f_fit)
+                    tau_guess = (y_fit.max() - y_fit.min()) / 3
+                    p0 = [A_guess, tau_guess]
+                    
+                    # Fit
+                    popt, pcov = curve_fit(exp_decay, y_fit, f_fit, p0=p0, maxfev=5000)
+                    tau = popt[1]
+                    tau_err = np.sqrt(pcov[1, 1])
+                    
+                    tau_all.append(tau)
+                    tau_err_all.append(tau_err)
+                    x_all.append(x_um)
+                    
+                except Exception:
+                    pass
+        
+        # Create comprehensive tau vs x plot for all domain wall region
+        if len(tau_all) >= 2:
+            fig_tau_all, ax_tau_all = plt.subplots(figsize=(10, 6), tight_layout=True)
+            ax_tau_all.errorbar(x_all, tau_all, yerr=tau_err_all, fmt='.', color='darkblue', 
+                               ecolor='lightblue', capsize=3, linewidth=1.5, markersize=5, alpha=0.7, label='All pixels')
+            # Overlay the 5 specific positions
+            ax_tau_all.errorbar(x_positions_for_tau_5pos, tau_values_5pos, yerr=tau_errors_5pos, 
+                               fmt='o', color='darkred', ecolor='red', capsize=5, linewidth=2, markersize=8, label='5 sampled positions')
+            ax_tau_all.set_xlabel('x [μm]')
+            ax_tau_all.set_ylabel(r'Decay time constant $\tau$')
+            ax_tau_all.set_title(f'Fluctuation decay timescale vs position (DW region: {x_min_dw_um}-{x_max_dw_um} μm)')
+            ax_tau_all.grid(True, alpha=0.3)
+            ax_tau_all.legend()
 
 
 def plot_used_region_density_fluctuations(D, y_unique, dy, y_axis_label, title, params, um_per_px, mode_cfg=None):
@@ -954,6 +1167,9 @@ def plot_main_waterfall(
     defect_counts=None,
     defect_sequences=None,
     defect_thresholds=None,
+    dw_fit_coeffs=None,
+    dw_fit_x=None,
+    dw_fit_t=None,
 ):
     fig, axs = plt.subplots(
         ncols=3,
@@ -1038,12 +1254,32 @@ def plot_main_waterfall(
 
     section_centers_x, sigmoid_centers_y, sigmoid_centers_err = [], [], []
 
-    if plot_flags.get('sectioned_sigmoid', False) and scan in ('ARP_Forward', 'ARP_Backward') and xmax_ind > xmin_ind:
+    if plot_flags.get('sectioned_sigmoid', False) and scan in ('ARP_Forward', 'ARP_Backward', 'bubbles', 'bubbles_evolution') and xmax_ind > xmin_ind:
         section_centers_x, sigmoid_centers_y, sigmoid_centers_err, _ = _sectioned_sigmoid_analysis(
             M, y_unique, x_plot_um, xmin_ind, xmax_ind, params['NUM_SECTIONS']
         )
         if len(section_centers_x) > 0:
-            ax_m.plot(section_centers_x, sigmoid_centers_y, color='violet', linewidth=2.5, label='Sigmoid centers')
+            # Apply same scaling as the main plot
+            plot_section_centers_x = section_centers_x
+            if is_bubbles_evolution:
+                plot_section_centers_x = np.array(section_centers_x) * 1e-6  # Convert to meters
+            
+            ax_m.plot(plot_section_centers_x, sigmoid_centers_y, color='violet', linewidth=2.5, label='Sigmoid centers')
+            
+            # Overlay domain wall fit line if available
+            if dw_fit_coeffs is not None and dw_fit_x is not None and dw_fit_t is not None:
+                # dw_fit_x is already in meters from plot_evolution_analysis
+                dw_fit_x_plot = dw_fit_x
+                if not is_bubbles_evolution:
+                    dw_fit_x_plot = dw_fit_x * 1e6  # Convert to micrometers
+                
+                x_line_plot = np.array([dw_fit_x_plot.min(), dw_fit_x_plot.max()])
+                # Use the fitted time values directly
+                y_line_plot = np.array([dw_fit_coeffs[0] * dw_fit_x.min() + dw_fit_coeffs[1], 
+                                        dw_fit_coeffs[0] * dw_fit_x.max() + dw_fit_coeffs[1]])
+                
+                ax_m.plot(x_line_plot, y_line_plot, 
+                         'g--', linewidth=2.5, alpha=0.7, label='Domain wall fit')
 
             # Dedicated plot: sigmoid center (scan variable value) vs x section position
             fig_sig, ax_sig = plt.subplots(figsize=(8, 5), tight_layout=True)
@@ -1112,7 +1348,7 @@ def plot_main_waterfall(
     # Show y-axis tick labels on the central waterfall plot
     ax_m.tick_params(axis='y', labelleft=True)
     
-    # Invert y-axis for bubbles_evolution
+    # Invert y-axis for bubbles_evolution so time increases downward
     if is_bubbles_evolution:
         ax_m.invert_yaxis()
         ax_d.invert_yaxis()
@@ -1395,12 +1631,19 @@ def plot_main_waterfall(
         ax_corr.grid(True, alpha=0.3)
 
 
-def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_per_px):
+def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_per_px, params=None):
+    from scipy.optimize import curve_fit
 
+    if params is None:
+        params = {}
+    x_min_um = params.get('X_MIN_INTEGRATION', 900)
+    x_max_um = params.get('X_MAX_INTEGRATION', 1200)
+    
     fig_fluct, ax_fluct = plt.subplots()
     z_fluc_smooth = gaussian_filter1d(z_local_fluctuations, sigma=2, axis=0)
-    start_idx, end_idx = 950, 1220
-    x_axis_mesh = np.linspace(930 * um_per_px, 1240 * um_per_px, z_fluc_smooth[:, start_idx:end_idx].shape[1]) * 1e-6
+    start_idx, end_idx = int(round(x_min_um / um_per_px)), int(round(x_max_um / um_per_px))
+    x_axis_pixels = np.arange(start_idx, end_idx)
+    x_axis_mesh = x_axis_pixels * um_per_px * 1e-6
     im_fluct = ax_fluct.pcolormesh(x_axis_mesh, y_plot, z_fluc_smooth[:, start_idx:end_idx], cmap='inferno')
     ax_fluct.set_title('Local z fluctuations')
     ax_fluct.set_ylabel(y_axis_label)
@@ -1409,15 +1652,114 @@ def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_pe
     plt.colorbar(im_fluct, ax=ax_fluct)
 
     fig_evol, ax_evol = plt.subplots()
-    m_copy = np.copy(M)[:, 920:1240] ** 2
+    m_copy = np.copy(M)[:, start_idx:end_idx] ** 2
     m_copy = gaussian_filter1d(m_copy, sigma=2, axis=1)
-    x_evol_mesh = np.linspace(920 * um_per_px, 1240 * um_per_px, m_copy.shape[1]) * 1e-6
+    x_evol_mesh = x_axis_mesh
     im_evol = ax_evol.pcolormesh(x_evol_mesh, y_plot, m_copy, vmin=0, vmax=0.001, cmap='viridis')
-    ax_evol.set_ylabel('t [ms]')
+    ax_evol.set_ylabel(y_axis_label)
     ax_evol.set_xlabel('x [μm]')
-    ax_evol.set_title('Magnetization evolution in the bubble region')
+    ax_evol.set_title('Magnetization evolution in the used region')
     ax_evol.invert_yaxis()
+    
+    # Compute sigmoid centers for each vertical line (time slice) in the used region
+    def sigmoid(x, x0, k, a, b):
+        return a / (1.0 + np.exp(-(x - x0) / k)) + b
+    
+    time_centers_y = []
+    sigmoid_centers_x = []
+    sigmoid_centers_err = []
+    
+    x_um_for_fit = np.arange(M.shape[0])  # y_plot indices for vertical line fits
+    
+    for col_idx in range(start_idx, end_idx):
+        vertical_profile = M[:, col_idx]
+        p0 = [np.median(x_um_for_fit), 0.1, np.max(vertical_profile) - np.min(vertical_profile), np.min(vertical_profile)]
+        try:
+            popt, pcov = curve_fit(sigmoid, x_um_for_fit, vertical_profile, p0=p0, maxfev=10000)
+            time_centers_y.append(y_plot[int(popt[0])] if int(popt[0]) < len(y_plot) else y_plot[-1])
+            sigmoid_centers_x.append((col_idx - start_idx) * um_per_px * 1e-6 + x_axis_mesh[0])
+            sigmoid_centers_err.append(float(np.sqrt(max(0.0, pcov[0, 0]))))
+        except Exception:
+            continue
+    
+    if len(sigmoid_centers_x) > 0:
+        ax_evol.plot(sigmoid_centers_x, time_centers_y, color='cyan', linewidth=2.5, label='Sigmoid centers')
+        ax_evol.legend()
+    
     plt.colorbar(im_evol, ax=ax_evol)
+    
+    # Domain wall velocity analysis
+    dw_x_min = params.get('DOMAIN_WALL_X_MIN', None)
+    dw_x_max = params.get('DOMAIN_WALL_X_MAX', None)
+    
+    if dw_x_min is not None and dw_x_max is not None and len(sigmoid_centers_x) > 0:
+        # Convert um limits to meters for comparison
+        dw_x_min_m = dw_x_min * 1e-6
+        dw_x_max_m = dw_x_max * 1e-6
+        
+        # Filter sigmoid centers within the specified range
+        mask = (np.array(sigmoid_centers_x) >= dw_x_min_m) & (np.array(sigmoid_centers_x) <= dw_x_max_m)
+        filtered_x = np.array(sigmoid_centers_x)[mask]
+        filtered_t = np.array(time_centers_y)[mask]
+        
+        # Print number of points per time value
+        unique_times, counts = np.unique(filtered_t, return_counts=True)
+        print(f"Domain wall analysis: {len(filtered_x)} total points")
+        for t_val, count in zip(unique_times, counts):
+            print(f"  Time {t_val}: {count} points")
+        
+        if len(filtered_x) >= 2:
+            # Fit a line to extract domain wall velocity
+            coeffs = np.polyfit(filtered_x, filtered_t, 1)
+            y_fit = np.polyval(coeffs, filtered_x)
+            residuals = filtered_t - y_fit
+            sigma_residuals = np.std(residuals)
+            
+            # Reject points more than 1 sigma outside the linear fit
+            mask_keep = np.abs(residuals) <= 1 * sigma_residuals
+            filtered_x_clean = filtered_x[mask_keep]
+            filtered_t_clean = filtered_t[mask_keep]
+            
+            # Redo fit with cleaned data
+            if len(filtered_x_clean) >= 2:
+                coeffs = np.polyfit(filtered_x_clean, filtered_t_clean, 1)
+            
+            print(f"Domain wall fit coefficients: {coeffs}")
+            print(f"  polyfit result: slope (dt/dx)={coeffs[0]}, intercept={coeffs[1]}")
+            print(f"  Fit equation (x in meters): bubbles_time = {coeffs[0]:.6e} * x + {coeffs[1]:.6f}")
+            print(f"  Fit equation (x in μm): bubbles_time = {coeffs[0]*1e-6:.6e} * x_um + {coeffs[1]:.6f}")
+            
+            velocity_slope = coeffs[0]  # dt/dx in ms/meter
+            velocity_um_ms = 1e6 / velocity_slope if velocity_slope != 0 else float('inf')  # um/ms
+            
+            # Create domain wall velocity plot
+            fig_dw, ax_dw = plt.subplots(figsize=(8, 5), tight_layout=True)
+            ax_dw.scatter(filtered_x * 1e6, filtered_t, color='red', s=50, alpha=0.5, label='All data points')
+            ax_dw.scatter(filtered_x_clean * 1e6, filtered_t_clean, color='darkred', s=50, label='Kept points (within 1σ)')
+            
+            # Plot fit line
+            x_line = np.array([filtered_x.min(), filtered_x.max()])
+            y_line = np.polyval(coeffs, x_line)
+            ax_dw.plot(x_line * 1e6, y_line, 'b-', linewidth=2, label=f'Linear fit: velocity = {velocity_um_ms:.3f} μm/ms')
+            
+            ax_dw.set_xlabel('x [μm]')
+            ax_dw.set_ylabel(y_axis_label)
+            ax_dw.set_title(f'Domain Wall Velocity Analysis (x: {dw_x_min}-{dw_x_max} μm)')
+            ax_dw.grid(True, alpha=0.3)
+            ax_dw.legend()
+            
+            # Calculate and print domain wall speed in um/ms
+            n_rejected = len(filtered_x) - len(filtered_x_clean)
+            print(f"Domain wall: rejected {n_rejected}/{len(filtered_x)} points outside 2σ (σ={sigma_residuals:.6g})")
+            if velocity_slope != 0:
+                print(f"Domain wall velocity: {velocity_um_ms:.3f} μm/ms")
+            else:
+                print("Domain wall velocity: infinite (vertical line)")
+            
+            # Return fit line data for overlay on main plot
+            return coeffs, filtered_x_clean, filtered_t_clean
+    
+    return None, None, None
 
 
 def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, average=False, title_labels=None, globals_in_title=None, params=None, plot_flags=None, mode_cfg=None):
@@ -1479,6 +1821,15 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             except Exception:
                 det_txt = str(det_val)
             print(f"  det={det_txt}: {len(idx)} shots")
+
+    if scan == 'bubbles_evolution':
+        print('bubbles_evolution: shots used after filtering per time value:')
+        for time_val, idx in zip(grouped_y, grouped_indices):
+            try:
+                time_txt = f"{float(time_val):.6g}"
+            except Exception:
+                time_txt = str(time_val)
+            print(f"  {y_axis_col}={time_txt}: {len(idx)} shots")
 
     profile_inputs = build_magnetization_inputs(sorted_df, mode_cfg if isinstance(mode_cfg, dict) else {}, params, data_origin)
     if profile_inputs is None:
@@ -2631,8 +2982,10 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             cbar_raw = fig_raw.colorbar(im_raw, cax=cax_raw)
             cbar_raw.set_label('magnetization m')
 
+    # Get domain wall fit data before creating main plot
+    dw_fit_coeffs, dw_fit_x, dw_fit_t = None, None, None
     if plot_flags.get('evolution_plots', False) and scan == 'bubbles_evolution':
-        plot_evolution_analysis(y_final, y_axis_col, z_fluc_final, M_final, um_per_px)
+        dw_fit_coeffs, dw_fit_x, dw_fit_t = plot_evolution_analysis(y_final, y_axis_col, z_fluc_final, M_final, um_per_px, params)
 
     if plot_flags.get('main_waterfall', True):
         title_full = f"{title_base}\n{'AVERAGED' if average else 'UNIQUE'}\n(seqs: {seqs})"
@@ -2671,7 +3024,76 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             defect_counts=defect_counts_for_plot,
             defect_sequences=defect_sequences_for_plot,
             defect_thresholds=defect_thresholds_for_plot,
+            dw_fit_coeffs=dw_fit_coeffs,
+            dw_fit_x=dw_fit_x,
+            dw_fit_t=dw_fit_t,
         )
+        
+        # For bubbles_evolution, plot fluctuations waterfall immediately after main waterfall
+        if scan == 'bubbles_evolution' and plot_flags.get('fluctuations_waterfall', False):
+            y_fluc, sigma2_map = compute_fluctuation_sigma2_waterfall(
+                M_full,
+                y_raw,
+                params['SIGMA_Z_LOCAL_FLUCT'],
+                params['SIGMA_Z_LOCAL_AVG'],
+            )
+            dy_fluc = np.min(np.diff(y_fluc)) if len(y_fluc) > 1 else 0.1
+            fluc_title = f"{title_base}\nAverage local fluctuations $\\sigma^2$ (m - <m>)\n(seqs: {seqs})"
+            plot_fluctuations_waterfall(
+                sigma2_map,
+                y_fluc,
+                dy_fluc,
+                y_axis_label,
+                fluc_title,
+                params,
+                um_per_px,
+                mode_cfg=mode_cfg if isinstance(mode_cfg, dict) else {},
+                dw_fit_coeffs=dw_fit_coeffs,
+                dw_fit_x=dw_fit_x,
+                dw_fit_t=dw_fit_t,
+            )
+        
+        # For bubbles_evolution, create additional waterfall with minimum magnetization selection
+        if scan == 'bubbles_evolution' and plot_flags.get('main_waterfall', True):
+            # Select shot with minimum average magnetization per time value
+            M_min_mag = np.zeros((len(grouped_indices), img_dims))
+            D_min_mag = np.zeros((len(grouped_indices), img_dims))
+            z_fluc_min_mag = np.zeros((len(grouped_indices), z_fluc_full.shape[1]))
+            
+            x_min_um = float(params['X_MIN_INTEGRATION'])
+            x_max_um = float(params['X_MAX_INTEGRATION'])
+            x_centers_um = np.arange(img_dims) * um_per_px
+            xmin_ind = int(np.argmin(np.abs(x_centers_um - x_min_um)))
+            xmax_ind = int(np.argmin(np.abs(x_centers_um - x_max_um)))
+            if xmax_ind < xmin_ind:
+                xmin_ind, xmax_ind = xmax_ind, xmin_ind
+            
+            for i, idx in enumerate(grouped_indices):
+                # Compute average magnetization in used region for each shot in this group
+                avg_mag_per_shot = np.mean(M_full[idx, xmin_ind:xmax_ind+1], axis=1)
+                # Find shot with minimum average magnetization
+                min_mag_shot_idx = idx[np.argmin(avg_mag_per_shot)]
+                M_min_mag[i] = M_full[min_mag_shot_idx]
+                D_min_mag[i] = D_full[min_mag_shot_idx]
+                z_fluc_min_mag[i] = z_fluc_full[min_mag_shot_idx]
+            
+            title_min_mag = f"{title_base}\nMinimum average magnetization shot per time\n(seqs: {seqs})"
+            plot_main_waterfall(
+                M_min_mag,
+                D_min_mag,
+                y_final,
+                dy,
+                y_axis_label,
+                title_min_mag,
+                scan,
+                params,
+                plot_flags,
+                um_per_px,
+                average=False,  # Already selected, not averaged
+                dw_fit_coeffs=dw_fit_coeffs,
+                dw_fit_x=dw_fit_x,
+                dw_fit_t=dw_fit_t,
+            )
 
     # Clean waterfall for KZ_defect_analysis without defect markers
     if scan == 'KZ_defect_analysis':
@@ -2698,7 +3120,8 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             defect_thresholds=None,
         )
 
-    if plot_flags.get('fluctuations_waterfall', False):
+    # Plot fluctuations waterfall for non-bubbles_evolution modes
+    if plot_flags.get('fluctuations_waterfall', False) and scan != 'bubbles_evolution':
         y_fluc, sigma2_map = compute_fluctuation_sigma2_waterfall(
             M_full,
             y_raw,
@@ -2715,6 +3138,10 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             fluc_title,
             params,
             um_per_px,
+            mode_cfg=mode_cfg if isinstance(mode_cfg, dict) else {},
+            dw_fit_coeffs=dw_fit_coeffs,
+            dw_fit_x=dw_fit_x,
+            dw_fit_t=dw_fit_t,
         )
 
     if plot_flags.get('used_region_density_fluctuations', False):

@@ -930,6 +930,12 @@ def main():
         log("ERROR: Could not load base DMD profile. Exiting.")
         return False
     
+    # Apply smoothing to initial profile if configured
+    if config.SMOOTH_INITIAL_PROFILE:
+        log(f"Applying Gaussian smoothing to initial profile (sigma={config.INITIAL_PROFILE_SMOOTHING_SIGMA})...")
+        old_profile = gaussian_filter(old_profile, sigma=config.INITIAL_PROFILE_SMOOTHING_SIGMA)
+        log("Initial profile smoothed")
+    
     # =========================================================================
     # 2) Load new sigmoid profile from waterfall
     # =========================================================================

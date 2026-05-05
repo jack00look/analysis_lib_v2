@@ -116,8 +116,15 @@ def get_axes(axes):
     return x_vals, y_vals, X_name, Y_name,inverted
 
 def get_n1Ds(n_2D,cam):
-    OD_int_hor = np.sum(n_2D,axis=0)*cam['px_size']
-    OD_int_vert = np.sum(n_2D,axis=1)*cam['px_size']
+    #n2D_cut = n_2D.copy()
+    #x_vals,y_vals,X_name,Y_name,inverted = get_axes(get_axes_infos(cam))
+    #xmin, xmax, ymin, ymax = get_roi_integration(cam,x_vals,y_vals)
+    # x_vals = np.arange(n2D_cut.shape[1])*cam['px_size']
+    # y_vals = np.arange(n2D_cut.shape[0])*cam['px_size']
+    # xmin, xmax, ymin, ymax = get_roi_integration(cam,x_vals,y_vals)
+    # n2D_cut = n2D_cut[ymin:ymax, xmin:xmax]
+    OD_int_hor = np.sum(n_2D[:,:],axis=0)*cam['px_size']
+    OD_int_vert = np.sum(n_2D[:,:],axis=1)*cam['px_size']
     return OD_int_hor, OD_int_vert
 
 def get_roiback_edges(cam,x_vals,y_vals):

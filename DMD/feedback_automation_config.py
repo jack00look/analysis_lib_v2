@@ -10,18 +10,18 @@ Edit the parameters below to control how feedback updates are generated automati
 # =============================================================================
 
 # Option 1: Load from a previous shot's h5 file
-USE_H5_PROFILE = True
+USE_H5_PROFILE = False
 
 # If USE_H5_PROFILE is True, specify the shot here:
 H5_SHOT_YEAR = 2026
 H5_SHOT_MONTH = 4
-H5_SHOT_DAY = 9
-H5_SHOT_SEQUENCE = 27
+H5_SHOT_DAY = 13
+H5_SHOT_SEQUENCE = 9
 H5_SHOT_ITERATION = 0
-H5_SHOT_REPETITION = 14
+H5_SHOT_REPETITION = 0
 
 # Option 2: Load from a txt file (set USE_H5_PROFILE to False)
-PROFILE_TXT_FILE = 'dmd_profile_20260331_103346.txt'  # Relative to DMD folder or absolute path
+PROFILE_TXT_FILE = 'dmd_profile_edited_20260415_153724.txt'  # Relative to DMD folder or absolute path
 
 # =============================================================================
 # NEW SIGMOID PROFILE LOCATION
@@ -48,6 +48,14 @@ DMD_PROFILES_FOLDER = None  # Set to None to use DMD folder, or set a custom pat
 # =============================================================================
 # GAUSSIAN SMOOTHING PARAMETERS
 # =============================================================================
+
+# Apply Gaussian smoothing to the initial profile when loaded?
+# This reduces noise in the base DMD profile from the h5 file or txt file
+SMOOTH_INITIAL_PROFILE = True
+
+# Gaussian blur sigma for the initial profile (in pixels)
+# Only used if SMOOTH_INITIAL_PROFILE is True
+INITIAL_PROFILE_SMOOTHING_SIGMA = 8
 
 # Default Gaussian blur sigma for error profiles (in pixels)
 # Used for new profiles added via auto_feedback_update.py

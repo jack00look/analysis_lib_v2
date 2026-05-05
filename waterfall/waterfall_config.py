@@ -1,38 +1,42 @@
 import numpy as np
 
 # Set this to pick what to run in waterfall_FLAT_v4.py
-ACTIVE_MODE = 'KZ_det_scan'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
+ACTIVE_MODE = 'bubbles_evolution'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
 # Optional override for sequence indices used by ACTIVE_MODE (set to None to use mode default)
 
 # If True, use recommended_center from the latest
 # results/kz_param_stability_safe_box_*.json.
 RECOMMENDED_CENTER = False
 
-SEQS = [43,44,45,46,47]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
-
+SEQS = [45]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
+#EQS = [41]
 # -------------------------
 # HDF Data Configuration
 # -------------------------
 HDF_CONFIG = {
-    'today': False,  # Set to False to load HDF from a previous day
+    'today': True,  # Set to False to load HDF from a previous day
     'year': 2026,   # Set if today=False (e.g., 2026)
-    'month': 3,  # Set if today=False (e.g., 3 for March)
-    'day': 24,    # Set if today=False (e.g., 17)
+    'month': 4,  # Set if today=False (e.g., 3 for March)
+    'day': 15,    # Set if today=False (e.g., 17)
 }
 
 # -------------------------
 # Shared numeric parameters
 # -------------------------
 PARAMS = {
-    'SIGMA_Z_LOCAL_AVG': 3,
-    'SIGMA_Z_LOCAL_FLUCT': 2,
+    'SIGMA_Z_LOCAL_AVG': 1.,
+    'SIGMA_Z_LOCAL_FLUCT': 1.,
     # Integration window limits are in micrometers (um)
     'X_MIN_INTEGRATION': 900,
     'X_MAX_INTEGRATION': 1200,
     'NUM_SECTIONS': 300,
     # Set to None for autoscale
-    'WATERFALL_MAG_CLIM': (-1., 1.),
+    'WATERFALL_MAG_CLIM': (-.1, 1.),
     'WATERFALL_DENSITY_CLIM': None,
+    # Domain wall velocity analysis (bubbles_evolution mode)
+    # Set X range for linear plot of sigmoid center time vs position
+    'DOMAIN_WALL_X_MIN': 910,  # Set to um value to enable (e.g., 950)
+    'DOMAIN_WALL_X_MAX': 1150,  # Set to um value to enable (e.g., 1150)
 }
 
 # -------------------------
@@ -70,12 +74,12 @@ MAGNETIZATION_MODALITIES = {
         # n1D_m1' = a1*n1D_m1 + b1*n1D_m2 + c1
         # n1D_m2' = a2*n1D_m2 + b2*n1D_m1 + c2
         'affine_correction': {
-            'a1': 1./2.4,#1.43/1.07,
+            'a1': 1.,#1./2.8,#1./2.4,#1.43/1.07,
             'b1': 0.0,
-            'c1': -1.7*(1./2.4)*1e9,#-0.3E8*1.43/1.07,#-0.47e8,
-            'a2': 1./0.9,#0.65/0.38,
+            'c1': 0.,#-1.6/2.8*1e9,#-1.7*(1./2.4)*1e9,#-0.3E8*1.43/1.07,#-0.47e8,
+            'a2': 1.,#1./1.5,#1./0.9,#0.65/0.38,
             'b2': 0.0,
-            'c2': -2.5*(1./0.9)*1e9,#-0.7E8,#-0.76e8*0.65/0.38,
+            'c2': 0.,#-2.5/1.5*1e9#-2.5*(1./0.9)*1e9,#-0.7E8,#-0.76e8*0.65/0.38,
         },
         # Optional explicit labels (if None, library auto-detects columns)
         'm1_column': None,
@@ -126,14 +130,14 @@ DEFECT_ANALYSIS_PARAMS = {
 # -------------------------
 DEFAULT_PLOTS = {
     'main_waterfall': True,
-    'fluctuations_waterfall': False,
+    'fluctuations_waterfall': True,
     'sectioned_sigmoid': True,
     'avg_density_profile': False,
-    'avg_magnetization_profile': True,
+    'avg_magnetization_profile': False,
     'corr_sigmoid_density': False,
     'corr_mag_density': False,
     'evolution_plots': False,
-    'used_region_density_fluctuations': True,
+    'used_region_density_fluctuations': False,
 }
 
 
@@ -263,7 +267,7 @@ MODE_CONFIGS = {
         'average': False,
         'plots': {
             **DEFAULT_PLOTS,
-            'sectioned_sigmoid': False,
+            'sectioned_sigmoid': True,
             'corr_sigmoid_density': False,
             'evolution_plots': False,
         },
@@ -310,8 +314,8 @@ MODE_CONFIGS = {
         'data_origin': 'show_ODs',
         'magnetization_modality': 'vert1_two_component',
         'constraints': {
-            'ARPKZ_final_set_field': 130.395,  # Set to desired value (e.g., 130.429)
-            'ARPKZ_omega_ramp_time': 32.,  # Set to desired value
+            'ARPKZ_final_set_field': 130.40,  # Set to desired value (e.g., 130.429)
+            'ARPKZ_omega_ramp_time': 16.,  # Set to desired value
             'ARPKZ_waiting_time': 10.,  # Set to desired value
         },
         'average': False,

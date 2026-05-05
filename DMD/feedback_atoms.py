@@ -193,10 +193,18 @@ def main(client, cameras,h5file):
     images = dict_images['images']
     infos_images = dict_images['infos']
     n2D = dict_images['images'][key]
-    roi_integration = cam_vert1['roi_integration']
-    n1D_x, n1D_y = imaging_analysis_lib_mod.get_n1Ds(n2D[roi_integration],cam_vert1)
     axes = dict_images['axes']
     x_vals, y_vals, X_name, Y_name,inverted = imaging_analysis_lib_mod.get_axes(axes)
+
+    roi_integration = cam_vert1['roi_integration']
+    roi_int_xmin, roi_int_xmax, roi_int_ymin, roi_int_ymax = imaging_analysis_lib_mod.get_roi_integration(cam_vert1,x_vals,y_vals)
+    print('ROI integration:', roi_integration)
+    roi_y,roi_x = roi_integration
+    roi_int_xmin = roi_x.start
+    roi_int_xmax = roi_x.stop
+    roi_int_ymin = roi_y.start
+    roi_int_ymax = roi_y.stop
+    n1D_x, n1D_y = imaging_analysis_lib_mod.get_n1Ds(n2D[roi_int_ymin:roi_int_ymax,:],cam_vert1)
 
     # m to um conversion of both x_vals and n1D
     x_vals = x_vals*1e6
@@ -261,8 +269,58 @@ def main(client, cameras,h5file):
                     f"ERROR: DMD load finished too late (load_end - run_time = {dt:.1f} s > {LOAD_TIME_WINDOW_S:.0f} s)."
                 )
 
+        # =====================================================================
+        # NEW CHECK: Validate using h5 file /data/dmd group (for comparison)
+        # =====================================================================
+        shot_valid_h5_based = True
+        validation_reason = ''
+        
+        try:
+            # Check if DMD was loading when shot was taken
+            if '/data/dmd/is_loading' in h5file:
+                is_loading = bool(h5file['/data/dmd/is_loading'][()])
+                if is_loading:
+                    shot_valid_h5_based = False
+                    validation_reason = 'h5_dmd_was_loading'
+                    print('NEW CHECK (h5-based): DMD was loading when shot was taken -> INVALID')
+                else:
+                    # DMD was not loading, check if last load finished in time
+                    if '/data/dmd/last_load_finished' in h5file and run_time_ts is not None:
+                        last_load_finished_ts = float(h5file['/data/dmd/last_load_finished'][()])
+                        dt_h5 = run_time_ts - last_load_finished_ts
+                        
+                        if dt_h5 <= LOAD_TIME_WINDOW_S:
+                            shot_valid_h5_based = False
+                            validation_reason = 'h5_load_finished_too_recently'
+                            print(
+                                f'NEW CHECK (h5-based): Load finished too recently '
+                                f'(only {dt_h5:.1f} s ago, need > {LOAD_TIME_WINDOW_S:.0f} s) -> INVALID'
+                            )
+                        else:
+                            print(
+                                f'NEW CHECK (h5-based): Load finished long enough ago '
+                                f'({dt_h5:.1f} s ago > {LOAD_TIME_WINDOW_S:.0f} s) -> VALID'
+                            )
+                    else:
+                        if '/data/dmd/last_load_finished' not in h5file:
+                            print('NEW CHECK (h5-based): /data/dmd/last_load_finished not found in h5 file')
+                        if run_time_ts is None:
+                            print('NEW CHECK (h5-based): run_time_ts is None, cannot perform timing check')
+            else:
+                print('NEW CHECK (h5-based): /data/dmd/is_loading not found in h5 file')
+        
+        except Exception as e:
+            print(f'NEW CHECK (h5-based): Error reading DMD validation data from h5: {e}')
+        
+        # Print comparison with old method
+        print(f'OLD CHECK (server-based): can_apply_feedback = {can_apply_feedback}')
+        print(f'NEW CHECK (h5-based): shot_valid_h5_based = {shot_valid_h5_based}')
+        print('---')
+
     # Apply feedback correction
     new_profile = last_profile_y + KP * n1D_x_err_smooth
+    #new_profile[ind_inside] = gaussian_filter(new_profile[ind_inside], sigma=SMOOTHING_SIGMA)  # Additional smoothing of the profile itself
+    #new_profile[ind_outside] = 0.0  # Default to 1.0 outside feedback region before applying walls
     min_inside = np.min(new_profile[ind_inside])
     if (min_inside-0.1) < 0:
         new_profile -= (min_inside-0.1)  # Shift up to ensure non-negativity in feedback region
