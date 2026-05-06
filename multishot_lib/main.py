@@ -262,6 +262,19 @@ def get_and_filter_shots(hdf_config, camera_name, seqs=None, hdf_root=None):
                 rejection_stats[f"norm_err ({image_name})"] += n_rejected
                 accepted_mask &= ~mask
     
+    # DMD validation check
+    # Accept: NaN (older shots before implementation) or True
+    # Reject: False
+    dmd_col = 'show_ODs_v2_dmd_validation_valid'
+    if dmd_col in df.columns:
+        # False means invalid DMD state
+        mask = df[dmd_col] == False
+        n_rejected = mask.sum()
+        if n_rejected > 0:
+            rejection_stats['dmd_validation_failed'] += n_rejected
+            accepted_mask &= ~mask
+        logger.info(f"DMD validation check: {n_rejected} shots rejected (dmd_validation_valid=False)")
+    
     # Filter DataFrame
     result_df = df[accepted_mask].copy()
     

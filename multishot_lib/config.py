@@ -5,22 +5,6 @@ This file defines the quality criteria used to reject shots during multishot ana
 """
 
 # ============================================================================
-# DMD Profile Update Check
-# ============================================================================
-# Set to False to disable DMD profile update validation
-# NOTE: show_ODs_v2 does not currently save dmd_profile_updated flag,
-# so this check will not be performed even if enabled
-ENABLE_DMD_CHECK = False
-
-# Time window (seconds) for DMD load to be considered valid relative to shot
-# If (load_completion_time - shot_run_time) > this value, shot is rejected
-DMD_LOAD_TIME_WINDOW_S = 20.0
-
-# DMD Server connection settings (used if ENABLE_DMD_CHECK is True)
-DMD_SERVER_IP = 'localhost'
-DMD_SERVER_PORT = 4242
-
-# ============================================================================
 # Image Quality Rejection Thresholds
 # ============================================================================
 # These thresholds are applied to per-image metrics from show_ODs results.
@@ -40,6 +24,13 @@ SATURATION_THRESHOLD = 0.05
 # Maximum allowed probe normalization error
 # Typical: 0.05 (5%) to 0.15 (15%)
 PROBE_NORM_ERROR_THRESHOLD = 0.1
+
+# ============================================================================
+# DMD Validation
+# ============================================================================
+# DMD validation is now performed in show_ODs_v2 and saved as 'show_ODs_v2_dmd_validation_valid'
+# Shots are accepted if dmd_validation_valid is NaN (older shots) or True
+# Shots are rejected if dmd_validation_valid is False (DMD was loading or load finished too recently)
 
 # ============================================================================
 # Logging and Reporting

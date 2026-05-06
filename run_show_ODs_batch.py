@@ -24,12 +24,12 @@ Usage:
 
 # Optional: Set to specific sequence indices to skip selection prompt
 # Example: SEQS = [26, 30]  or set to None to prompt user
-SEQS = [26]  # type: list | None
+SEQS = [45]  # type: list | None
 
 # Optional: Set to specify date directly to skip date selection prompt
 # Example: HDF_CONFIG = {'today': False, 'year': 2026, 'month': 4, 'day': 15}
 # or: HDF_CONFIG = {'today': True}  to use today's date
-HDF_CONFIG = {'today': False, 'year': 2026, 'month': 4, 'day': 15}  # type: dict | None
+HDF_CONFIG = {'today': False, 'year': 2026, 'month': 5, 'day': 4}  # type: dict | None
 
 # =========================================================================
 
@@ -44,8 +44,49 @@ import traceback
 import getpass
 import importlib.util
 import pandas as pd
+from multiprocessing import Pool, cpu_count
+from functools import partial
+import time
+from datetime import timedelta
+
+# Set matplotlib backend BEFORE importing pyplot or show_ODs_v2
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend for headless operation
+
+# =========================================================================
+# PERFORMANCE TUNING
+# =========================================================================
+NUM_WORKERS = max(1, min(4, cpu_count() - 1))  # Use up to 4 workers to avoid HDF5 file locking
+SKIP_EXISTING = False  # Always re-analyze files (set to True to skip if results exist)
+DISABLE_LOGGING = True  # Set to True to suppress INFO logging (speeds up output)
+# =========================================================================
+
+# Timing utilities
+class Timer:
+    def __init__(self, name=""):
+        self.name = name
+        self.start_time = None
+        self.elapsed = 0
+    
+    def __enter__(self):
+        self.start_time = time.time()
+        return self
+    
+    def __exit__(self, *args):
+        self.elapsed = time.time() - self.start_time
+    
+    def format(self):
+        if self.elapsed < 1:
+            return f"{self.elapsed*1000:.0f}ms"
+        elif self.elapsed < 60:
+            return f"{self.elapsed:.1f}s"
+        else:
+            return str(timedelta(seconds=self.elapsed)).split('.')[0]
 
 # Setup logging
+if DISABLE_LOGGING:
+    logging.disable(logging.INFO)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -128,7 +169,7 @@ def get_hdf_files_for_date(date_str, seq_indices=None, hdf_root=None):
     return files_by_seq
 
 
-def process_file(hdf_file_path, consolidation=None):
+def process_file(hdf_file_path, consolidation=None, sequence_num=None):
     """
     Run show_ODs analysis on a single HDF5 file and save results.
     
@@ -138,6 +179,8 @@ def process_file(hdf_file_path, consolidation=None):
         Path to HDF5 result file
     consolidation : dict, optional
         Consolidation tracking dict to accumulate results into DataFrame
+    sequence_num : int, optional
+        Sequence number for routing to correct consolidation
     
     Returns
     -------
@@ -145,9 +188,12 @@ def process_file(hdf_file_path, consolidation=None):
         True if successful, False otherwise
     """
     try:
-        logger.info(f"Processing: {os.path.basename(hdf_file_path)}")
-        
         with h5py.File(hdf_file_path, 'r+') as h5file:
+            # Check if already processed and skip if configured
+            if SKIP_EXISTING:
+                if 'results' in h5file and 'show_ODs_v2' in h5file['results']:
+                    return True  # Already processed, count as success
+            
             # Run analysis (show=False to skip plotting)
             dict_results = show_ODs_v2_mod.show_ODs(h5file, show=False, show_SVD=True)
             
@@ -188,7 +234,7 @@ def process_file(hdf_file_path, consolidation=None):
             logger.info(f"  ✓ Saved {len(dict_results)} results")
             
             # Add to consolidation DataFrame if provided
-            if consolidation is not None:
+            if consolidation is not None and sequence_num is not None:
                 try:
                     row_data = dict(dict_results)
                     
@@ -213,7 +259,9 @@ def process_file(hdf_file_path, consolidation=None):
                             except Exception as e:
                                 logger.debug(f"    Could not add globals attribute {key}: {e}")
                     
-                    consolidation['rows'].append(row_data)
+                    # Add to correct sequence's consolidation
+                    if sequence_num in consolidation:
+                        consolidation[sequence_num]['rows'].append(row_data)
                 except Exception as e:
                     logger.debug(f"  Could not add to consolidation: {e}")
             
@@ -223,6 +271,21 @@ def process_file(hdf_file_path, consolidation=None):
         logger.error(f"Error processing {hdf_file_path}: {e}")
         traceback.print_exc()
         return False
+
+
+def process_file_wrapper(args):
+    """
+    Wrapper for parallel processing of files.
+    Returns filename and success status for progress tracking.
+    """
+    hdf_file_path, = args
+    filename = os.path.basename(hdf_file_path)
+    success = False
+    try:
+        success = process_file(hdf_file_path)
+    except Exception as e:
+        logger.debug(f"Error in wrapper for {filename}: {e}")
+    return filename, success
 
 
 def get_date_list(args):
@@ -470,7 +533,8 @@ def prompt_for_sequences(files_by_seq, date_str):
 
 def init_consolidation(selected_seqs, date_str, hdf_root=None):
     """
-    Initialize consolidation tracking dict for accumulating shot results into a DataFrame.
+    Initialize consolidation tracking dict for accumulating shot results into DataFrames,
+    one per sequence.
     
     Parameters
     ----------
@@ -484,7 +548,12 @@ def init_consolidation(selected_seqs, date_str, hdf_root=None):
     Returns
     -------
     dict
-        Consolidation tracking dict with structure for accumulating results
+        Consolidation tracking dict with structure:
+        {
+            seq_num_1: {'path': str, 'hdf_root': str, 'rows': []},
+            seq_num_2: {'path': str, 'hdf_root': str, 'rows': []},
+            ...
+        }
     """
     if hdf_root is None:
         hdf_root = '/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/data_reanalyzed'
@@ -494,23 +563,26 @@ def init_consolidation(selected_seqs, date_str, hdf_root=None):
     data_dir = os.path.join(hdf_root, year, month, day)
     os.makedirs(data_dir, exist_ok=True)
     
-    # Create filename from sequences
-    seq_nums = sorted(selected_seqs.keys())
-    seq_names = '_'.join([f'seq_{seq:04d}' for seq in seq_nums])
-    hdf_path = os.path.join(data_dir, f'{seq_names}.hdf')
+    # Create one consolidation per sequence
+    consolidations = {}
+    for seq_num in sorted(selected_seqs.keys()):
+        seq_name = f'seq_{seq_num:04d}'
+        hdf_path = os.path.join(data_dir, f'{seq_name}.hdf')
+        
+        logger.info(f"Consolidation for {seq_name}: {hdf_path}")
+        
+        consolidations[seq_num] = {
+            'path': hdf_path,
+            'hdf_root': hdf_root,
+            'rows': []  # Accumulate rows as list of dicts
+        }
     
-    logger.info(f"Consolidation initialized for: {os.path.basename(hdf_path)}")
-    
-    return {
-        'path': hdf_path,
-        'hdf_root': hdf_root,
-        'rows': []  # Accumulate rows as list of dicts
-    }
+    return consolidations
 
 
-def save_consolidated_hdf(consolidation):
+def save_consolidated_hdf(consolidations):
     """
-    Save accumulated shot results to consolidated HDF file.
+    Save accumulated shot results to consolidated HDF files, one per sequence.
     
     Creates a MultiIndex DataFrame matching Lyse structure with:
     - Index: DatetimeIndex with 'run time' extracted from h5_attr_run time
@@ -518,71 +590,158 @@ def save_consolidated_hdf(consolidation):
     
     Parameters
     ----------
-    consolidation : dict
-        Consolidation tracking dict with accumulated rows
+    consolidations : dict
+        Consolidation tracking dict with accumulated rows per sequence:
+        {seq_num_1: {...}, seq_num_2: {...}, ...}
     
     Returns
     -------
-    str or None
-        Path to saved consolidated HDF file, or None if error
+    list
+        List of paths to saved consolidated HDF files
     """
     try:
-        if not consolidation or not consolidation['rows']:
-            logger.warning("No data to consolidate")
-            return None
+        saved_paths = []
         
-        # Create DataFrame from accumulated rows
-        df_consolidated = pd.DataFrame(consolidation['rows'])
-        logger.info(f"Consolidated DataFrame: {len(df_consolidated)} rows × {len(df_consolidated.columns)} columns")
+        if not consolidations:
+            logger.warning("No consolidations to save")
+            return []
         
-        # Create DatetimeIndex from 'h5_attr_run time' column (matches Lyse structure)
-        if 'h5_attr_run time' in df_consolidated.columns:
+        for seq_num, consolidation in consolidations.items():
+            if not consolidation or not consolidation['rows']:
+                logger.warning(f"No data to consolidate for sequence {seq_num:04d}")
+                continue
+            
+            # Create DataFrame from accumulated rows
+            df_consolidated = pd.DataFrame(consolidation['rows'])
+            logger.info(f"Seq {seq_num:04d}: {len(df_consolidated)} rows × {len(df_consolidated.columns)} columns")
+            
+            # Create DatetimeIndex from 'h5_attr_run time' column (matches Lyse structure)
+            if 'h5_attr_run time' in df_consolidated.columns:
+                try:
+                    # Convert run time strings to datetime
+                    run_times = pd.to_datetime(df_consolidated['h5_attr_run time'])
+                    df_consolidated.index = run_times
+                    df_consolidated.index.name = 'run time'
+                    logger.info(f"  ✓ Set DatetimeIndex from 'h5_attr_run time'")
+                except Exception as e:
+                    logger.debug(f"  Could not create DatetimeIndex: {e}")
+            
+            # Separate columns for MultiIndex structure matching Lyse format:
+            # ALL columns as tuples: (data_origin, column_name)
+            # Globals use empty string as data_origin: ('ARPB_final_det', '')
+            # Measurements use data origin: ('show_ODs_v2', 'm1_1d')
+            measurement_cols = []
+            global_cols = []
+            
+            for col in df_consolidated.columns:
+                if col.startswith('globals_attr_') or col.startswith('h5_attr_'):
+                    global_cols.append(col)
+                else:
+                    measurement_cols.append(col)
+            
+            # Build column data efficiently using dict before DataFrame construction
+            col_data = {}
+            
+            # Add global columns as MultiIndex tuples with empty string as data_origin
+            for col in global_cols:
+                # Remove 'globals_attr_' and 'h5_attr_' prefixes to get clean column name
+                if col.startswith('globals_attr_'):
+                    col_name = col.replace('globals_attr_', '')
+                elif col.startswith('h5_attr_'):
+                    col_name = col.replace('h5_attr_', '')
+                else:
+                    col_name = col
+                # Use ('col_name', '') format for globals (matches Lyse)
+                multi_col = (col_name, '')
+                col_data[multi_col] = df_consolidated[col].values
+            
+            # Add measurement columns with MultiIndex tuples (data_origin, col_name)
+            data_origin = 'show_ODs_v2'  # This is the data source for all measurements
+            for col in measurement_cols:
+                multi_col = (data_origin, col)
+                col_data[multi_col] = df_consolidated[col].values
+            
+            # Create DataFrame from dict all at once (much faster than incremental assignment)
+            df_final = pd.DataFrame(col_data, index=df_consolidated.index)
+            df_consolidated = df_final
+            logger.info(f"  ✓ Created column structure ({len(global_cols)} globals, {len(measurement_cols)} measurements)")
+            
+            # Save to HDF (overwrite if exists)
+            hdf_path = consolidation['path']
             try:
-                # Convert run time strings to datetime
-                run_times = pd.to_datetime(df_consolidated['h5_attr_run time'])
-                df_consolidated.index = run_times
-                df_consolidated.index.name = 'run time'
-                logger.info(f"✓ Set DatetimeIndex from 'h5_attr_run time'")
+                # Remove existing file if present
+                if os.path.exists(hdf_path):
+                    logger.info(f"  Overwriting existing file: {os.path.basename(hdf_path)}")
+                    os.remove(hdf_path)
+                
+                # Try with fixed format first (handles mixed types better)
+                df_consolidated.to_hdf(hdf_path, key='data', mode='w', format='fixed')
+                logger.info(f"  ✓ Saved to: {os.path.basename(hdf_path)}")
+                saved_paths.append(hdf_path)
+            
             except Exception as e:
-                logger.debug(f"Could not create DatetimeIndex: {e}")
+                logger.debug(f"  Fixed format failed: {e}, trying pickle format")
+                try:
+                    # Fall back to pickle format
+                    import pickle
+                    pkl_path = hdf_path.replace('.hdf', '.pkl')
+                    if os.path.exists(pkl_path):
+                        os.remove(pkl_path)
+                    with open(pkl_path, 'wb') as f:
+                        pickle.dump(df_consolidated, f)
+                    logger.info(f"  ✓ Saved consolidated data (pickle format)")
+                    saved_paths.append(pkl_path)
+                except Exception as e2:
+                    logger.error(f"  Both formats failed: {e2}")
         
-        # Convert columns to MultiIndex (col_name, '') matching Lyse structure
-        if not isinstance(df_consolidated.columns, pd.MultiIndex):
-            df_consolidated.columns = pd.MultiIndex.from_product(
-                [df_consolidated.columns, ['']],
-                names=[None, None]
-            )
-            logger.info(f"✓ Created MultiIndex columns structure")
-        
-        # Save to HDF
-        hdf_path = consolidation['path']
-        try:
-            # Try with fixed format first (handles mixed types better)
-            df_consolidated.to_hdf(hdf_path, key='data', mode='w', format='fixed')
-        except Exception as e:
-            logger.debug(f"Fixed format failed: {e}, trying pickle format")
-            try:
-                # Fall back to pickle format
-                import pickle
-                with open(hdf_path.replace('.hdf', '.pkl'), 'wb') as f:
-                    pickle.dump(df_consolidated, f)
-                logger.info(f"✓ Saved consolidated data (pickle format)")
-                return hdf_path.replace('.hdf', '.pkl')
-            except Exception as e2:
-                logger.error(f"Both formats failed: {e2}")
-                raise
-        logger.info(f"✓ Saved consolidated data to: {hdf_path}")
-        
-        return hdf_path
+        return saved_paths
     
     except Exception as e:
-        logger.error(f"Error saving consolidated HDF: {e}")
+        logger.error(f"Error saving consolidated HDFs: {e}")
         traceback.print_exc()
-        return None
+        return []
+
+
+# Module-level function for multiprocessing (must be picklable)
+def load_consolidation_row(args):
+    """Load a single file's consolidation data. Used by consolidation loading pool."""
+    hdf_file, seq_mapping = args
+    try:
+        with h5py.File(hdf_file, 'r') as h5file:
+            if 'results' in h5file and 'show_ODs_v2' in h5file['results']:
+                show_ODs_group = h5file['results']['show_ODs_v2']
+                
+                # Extract result values
+                dict_results = {}
+                for key in show_ODs_group.attrs.keys():
+                    dict_results[key] = show_ODs_group.attrs[key]
+                for key in show_ODs_group.keys():
+                    try:
+                        dict_results[key] = show_ODs_group[key][()]
+                    except:
+                        dict_results[key] = show_ODs_group[key][...]
+                
+                row_data = dict(dict_results)
+                row_data['shot_name'] = os.path.splitext(os.path.basename(hdf_file))[0]
+                
+                # Add h5 and globals attributes
+                for key, value in h5file.attrs.items():
+                    row_data[f"h5_attr_{key}"] = value
+                if 'globals' in h5file:
+                    for key, value in h5file['globals'].attrs.items():
+                        row_data[f"globals_attr_{key}"] = value
+                
+                return (seq_mapping[hdf_file], row_data)
+    except Exception as e:
+        logger.debug(f"Could not load consolidation data from {os.path.basename(hdf_file)}: {e}")
+    return None
 
 
 def main():
     """Main entry point with interactive prompts."""
+    
+    total_timer = Timer()
+    total_timer.__enter__()
     
     # Prompt for date
     date_str = prompt_for_date()
@@ -619,32 +778,84 @@ def main():
         print("Cancelled.")
         return False
     
-    # Initialize consolidation DataFrame
+    # Initialize consolidation DataFrames (one per sequence)
     logger.info(f"\n{'='*60}")
-    logger.info(f"INITIALIZING CONSOLIDATION")
+    logger.info(f"INITIALIZING CONSOLIDATION (ONE PER SEQUENCE)")
     logger.info(f"{'='*60}")
-    consolidation = init_consolidation(selected_seqs, date_str)
+    init_timer = Timer()
+    with init_timer:
+        consolidations = init_consolidation(selected_seqs, date_str)
+    logger.info(f"Consolidation initialized in {init_timer.format()}")
     
     # Process files
     logger.info(f"\n{'='*60}")
     logger.info(f"PROCESSING {total_files} FILES IN {len(selected_seqs)} SEQUENCE(S)")
+    logger.info(f"Using {NUM_WORKERS} parallel workers")
     logger.info(f"{'='*60}")
     
     total_success = 0
     file_count = 0
     
+    # Flatten file list for parallel processing
+    all_files = []
+    file_to_seq = {}  # Track which sequence each file belongs to
     for seq_num in sorted(selected_seqs.keys()):
         files = selected_seqs[seq_num]
         logger.info(f"\nSequence {seq_num:04d} ({len(files)} files):")
-        
         for hdf_file in files:
-            file_count += 1
-            print(f"  [{file_count}/{total_files}] {os.path.basename(hdf_file)}", end=" ... ")
-            if process_file(hdf_file, consolidation=consolidation):
-                print("✓")
-                total_success += 1
-            else:
-                print("✗")
+            all_files.append(hdf_file)
+            file_to_seq[hdf_file] = seq_num
+    
+    # Process in parallel (with timing)
+    process_timer = Timer()
+    try:
+        with process_timer:
+            with Pool(NUM_WORKERS) as pool:
+                results = pool.imap_unordered(process_file_wrapper, [(f,) for f in all_files])
+                for filename, success in results:
+                    file_count += 1
+                    status = "✓" if success else "✗"
+                    print(f"  [{file_count}/{total_files}] {filename} ... {status}")
+                    if success:
+                        total_success += 1
+    except Exception as e:
+        logger.warning(f"Parallel processing failed, falling back to sequential: {e}")
+        # Fallback to sequential processing
+        with process_timer:
+            for hdf_file in all_files:
+                file_count += 1
+                print(f"  [{file_count}/{total_files}] {os.path.basename(hdf_file)}", end=" ... ")
+                if process_file(hdf_file):
+                    print("✓")
+                    total_success += 1
+                else:
+                    print("✗")
+    
+    logger.info(f"File processing completed in {process_timer.format()} ({total_files/max(process_timer.elapsed, 0.001):.1f} files/sec)")
+    
+    # Now load all processed files and build consolidations
+    logger.info(f"\nLoading analysis results into consolidations...")
+    consolidation_timer = Timer()
+    with consolidation_timer:
+        # Parallel consolidation loading
+        try:
+            with Pool(NUM_WORKERS) as pool:
+                # Pass tuples of (hdf_file, file_to_seq mapping)
+                work_items = [(f, file_to_seq) for f in all_files]
+                for result in pool.imap_unordered(load_consolidation_row, work_items):
+                    if result:
+                        seq_num, row_data = result
+                        consolidations[seq_num]['rows'].append(row_data)
+        except Exception as e:
+            logger.error(f"Parallel consolidation loading failed: {e}")
+            # Fall back to sequential loading (shouldn't happen, but safe)
+            for hdf_file in all_files:
+                result = load_consolidation_row((hdf_file, file_to_seq))
+                if result:
+                    seq_num, row_data = result
+                    consolidations[seq_num]['rows'].append(row_data)
+    
+    logger.info(f"Consolidation loading completed in {consolidation_timer.format()}")
     
     # Summary
     logger.info(f"\n{'='*60}")
@@ -654,15 +865,32 @@ def main():
     logger.info(f"Successful: {total_success}")
     logger.info(f"Failed: {total_files - total_success}")
     
-    # Save consolidated HDF
+    # Save consolidated HDFs
     if total_success > 0:
         logger.info(f"\n{'='*60}")
-        logger.info(f"SAVING CONSOLIDATED HDF")
+        logger.info(f"SAVING CONSOLIDATED HDFS (ONE PER SEQUENCE)")
         logger.info(f"{'='*60}")
-        consolidated_path = save_consolidated_hdf(consolidation)
-        if consolidated_path:
-            print(f"\n✓ Consolidated data saved to:")
-            print(f"  {consolidated_path}")
+        save_timer = Timer()
+        with save_timer:
+            consolidated_paths = save_consolidated_hdf(consolidations)
+        logger.info(f"HDF save completed in {save_timer.format()}")
+        
+        if consolidated_paths:
+            print(f"\n✓ Consolidated data saved:")
+            for path in consolidated_paths:
+                print(f"  {path}")
+    
+    # Final timing report
+    total_timer.__exit__(None, None, None)
+    print(f"\n{'='*70}")
+    print(f"TIMING SUMMARY")
+    print(f"{'='*70}")
+    print(f"Total execution time: {total_timer.format()}")
+    print(f"  - File processing: {process_timer.format()} ({total_files/max(process_timer.elapsed, 0.001):.1f} files/sec)")
+    print(f"  - Consolidation loading: {consolidation_timer.format()}")
+    if 'save_timer' in locals():
+        print(f"  - HDF save: {save_timer.format()}")
+    print(f"{'='*70}\n")
     
     return total_success == total_files
 

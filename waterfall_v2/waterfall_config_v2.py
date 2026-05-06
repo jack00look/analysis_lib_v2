@@ -15,7 +15,7 @@ sys.path.insert(0, '/home/rick/labscript-suite/userlib/analysislib/analysislib_v
 ACTIVE_MODE = 'bubbles_evolution'  # <-- Set your active mode here
 
 # Optional override for sequence indices used by ACTIVE_MODE (set to None to use mode default)
-SEQS = [26,30]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
+SEQS = [40]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
 
 # -------------------------
 # HDF Data Configuration
@@ -23,8 +23,8 @@ SEQS = [26,30]  # <-- Set your sequence indices here, or set to None to use defa
 HDF_CONFIG = {
     'today': False,  # Set to False to load HDF from a previous day
     'year': 2026,   # Set if today=False (e.g., 2026)
-    'month': 4,  # Set if today=False (e.g., 3 for March)
-    'day': 15,    # Set if today=False (e.g., 17)
+    'month': 5,  # Set if today=False (e.g., 5 for May)
+    'day': 4,    # Set if today=False (e.g., 4)
     'reanalyzed': True,  # NEW: Set to True to load from data_reanalyzed/ instead of NAS
 }
 # 

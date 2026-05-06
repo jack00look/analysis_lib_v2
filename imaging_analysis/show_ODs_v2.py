@@ -121,22 +121,28 @@ def _validate_dmd_state_h5(h5file, run_time_ts):
     """
     Validate DMD state using h5 file /data/dmd group.
     
-    Returns tuple: (is_valid, validation_message)
+    Returns tuple: (is_valid, validation_message, dmd_data_present)
+      - is_valid: whether the shot passes validation
+      - validation_message: detailed message
+      - dmd_data_present: whether /data/dmd group exists in h5
     """
     try:
+        if '/data/dmd' not in h5file:
+            return None, 'DMD data group /data/dmd not found in h5 file', False
+        
         if '/data/dmd/is_loading' not in h5file:
-            return True, 'DMD validation: /data/dmd/is_loading not found (skipping validation)'
+            return None, 'DMD validation: /data/dmd/is_loading not found', False
         
         is_loading = bool(h5file['/data/dmd/is_loading'][()])
         if is_loading:
-            return False, 'DMD validation: DMD was loading when shot was taken -> INVALID'
+            return False, 'DMD validation: DMD was loading when shot was taken -> INVALID', True
         
         # DMD was not loading, check if last load finished in time
         if '/data/dmd/last_load_finished' not in h5file:
-            return True, 'DMD validation: /data/dmd/last_load_finished not found (skipping timing check)'
+            return None, 'DMD validation: /data/dmd/last_load_finished not found', False
         
         if run_time_ts is None:
-            return True, 'DMD validation: run_time_ts is None, cannot perform timing check'
+            return None, 'DMD validation: run_time_ts is None, cannot perform timing check', False
         
         last_load_finished_ts = float(h5file['/data/dmd/last_load_finished'][()])
         dt = run_time_ts - last_load_finished_ts
@@ -145,15 +151,15 @@ def _validate_dmd_state_h5(h5file, run_time_ts):
             return False, (
                 f'DMD validation: Load finished too recently '
                 f'(only {dt:.1f} s ago, need > {LOAD_TIME_WINDOW_S:.0f} s) -> INVALID'
-            )
+            ), True
         else:
             return True, (
                 f'DMD validation: Load finished long enough ago '
                 f'({dt:.1f} s ago > {LOAD_TIME_WINDOW_S:.0f} s) -> VALID'
-            )
+            ), True
     
     except Exception as e:
-        return True, f'DMD validation: Error reading DMD validation data from h5: {e}'
+        return None, f'DMD validation: Error reading DMD validation data from h5: {e}', False
 
 
 def show_ODs(h5file, show=True, show_SVD=True):
@@ -184,8 +190,14 @@ def show_ODs(h5file, show=True, show_SVD=True):
     # DMD Validation Check (h5-based)
     # =========================================================================
     run_time_ts = _get_shot_run_time_timestamp(h5file)
-    dmd_is_valid, dmd_validation_msg = _validate_dmd_state_h5(h5file, run_time_ts)
+    dmd_is_valid, dmd_validation_msg, dmd_data_present = _validate_dmd_state_h5(h5file, run_time_ts)
     logger.info(dmd_validation_msg)
+    
+    # If DMD data is missing from h5, return None to indicate this shot has no DMD data
+    if not dmd_data_present:
+        logger.warning(f"No DMD data in h5 file - returning None")
+        return None
+    
     infos_analysis['dmd_validation_valid'] = dmd_is_valid
     infos_analysis['dmd_validation_message'] = dmd_validation_msg
     
@@ -240,6 +252,12 @@ def show_ODs(h5file, show=True, show_SVD=True):
                 key = normal_keys[i]
                 logger.info(f"Plotting: {key}")
                 j = 0
+                
+                # Log all quality estimates for this image
+                logger.info(f"Quality estimates for {key}:")
+                for key_info in infos_images[key]:
+                    value = infos_images[key][key_info]
+                    logger.info(f"  {key_info}: {value}")
                 
                 # Save all image metadata
                 for key_infos in infos_images[key]:
@@ -303,6 +321,12 @@ def show_ODs(h5file, show=True, show_SVD=True):
                         key = svd_keys[i]
                         logger.info(f"Plotting SVD: {key}")
                         j = 0
+                        
+                        # Log all quality estimates for this SVD image
+                        logger.info(f"Quality estimates for SVD {key}:")
+                        for key_info in infos_images_svd[key]:
+                            value = infos_images_svd[key][key_info]
+                            logger.info(f"  {key_info}: {value}")
                         
                         # Save SVD metadata
                         for key_infos in infos_images_svd[key]:
