@@ -10,14 +10,14 @@ PARAMS = {
     'SIGMA_Z_LOCAL_FLUCT': 1.,
     # Integration window limits are in micrometers (um)
     'X_MIN_INTEGRATION': 900,
-    'X_MAX_INTEGRATION': 1200,
+    'X_MAX_INTEGRATION': 1170,
     'NUM_SECTIONS': 300,
     # Set to None for autoscale
-    'WATERFALL_MAG_CLIM': (-.1, 1.),
+    'WATERFALL_MAG_CLIM': (-.3, .2),
     'WATERFALL_DENSITY_CLIM': None,
     # Domain wall velocity analysis
     'DOMAIN_WALL_X_MIN': 910,
-    'DOMAIN_WALL_X_MAX': 1150,
+    'DOMAIN_WALL_X_MAX': 1350,
 }
 
 # -------------------------

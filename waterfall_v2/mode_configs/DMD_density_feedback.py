@@ -16,6 +16,7 @@ MODE_CONFIG = {
         'corr_mag_density': False,
         'evolution_plots': False,
         'used_region_density_fluctuations': True,
+        'all_shots_waterfall': False,
     },
     'globals_in_title': [],
     'shot_name_filter': None,

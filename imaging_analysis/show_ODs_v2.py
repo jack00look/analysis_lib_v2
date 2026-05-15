@@ -193,10 +193,10 @@ def show_ODs(h5file, show=True, show_SVD=True):
     dmd_is_valid, dmd_validation_msg, dmd_data_present = _validate_dmd_state_h5(h5file, run_time_ts)
     logger.info(dmd_validation_msg)
     
-    # If DMD data is missing from h5, return None to indicate this shot has no DMD data
+    # If DMD data is missing from h5, set validation to None but continue processing
     if not dmd_data_present:
-        logger.warning(f"No DMD data in h5 file - returning None")
-        return None
+        logger.warning(f"No DMD data in h5 file - continuing with analysis (dmd_validation_valid=None)")
+        dmd_is_valid = None
     
     infos_analysis['dmd_validation_valid'] = dmd_is_valid
     infos_analysis['dmd_validation_message'] = dmd_validation_msg

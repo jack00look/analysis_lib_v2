@@ -24,12 +24,12 @@ Usage:
 
 # Optional: Set to specific sequence indices to skip selection prompt
 # Example: SEQS = [26, 30]  or set to None to prompt user
-SEQS = [45]  # type: list | None
+SEQS = [33, 34, 35, 36, 37, 38, 43, 44, 45, 46, 47]  # type: list | None
 
 # Optional: Set to specify date directly to skip date selection prompt
 # Example: HDF_CONFIG = {'today': False, 'year': 2026, 'month': 4, 'day': 15}
 # or: HDF_CONFIG = {'today': True}  to use today's date
-HDF_CONFIG = {'today': False, 'year': 2026, 'month': 5, 'day': 4}  # type: dict | None
+HDF_CONFIG = {'today': False, 'year': 2026, 'month': 3, 'day': 24}  # type: dict | None
 
 # =========================================================================
 
@@ -737,46 +737,116 @@ def load_consolidation_row(args):
     return None
 
 
-def main():
-    """Main entry point with interactive prompts."""
+def run_analysis(year, month, day, sequences=None, verbose=True):
+    """
+    Programmatic entry point for running show_ODs_v2 batch analysis.
+    
+    This function can be imported and called from other scripts to preprocess
+    HDF5 files for specific dates and sequences without requiring user interaction.
+    
+    Parameters
+    ----------
+    year : int
+        Year (e.g., 2026)
+    month : int
+        Month (1-12)
+    day : int
+        Day (1-31)
+    sequences : list, optional
+        List of sequence indices to process (e.g., [26, 30]).
+        If None, will process all available sequences for that date.
+    verbose : bool
+        If True, print status messages. If False, suppress output (except errors).
+    
+    Returns
+    -------
+    bool
+        True if analysis completed successfully, False otherwise.
+    
+    Examples
+    --------
+    >>> from run_show_ODs_batch import run_analysis
+    >>> success = run_analysis(2026, 3, 24, sequences=[33, 34, 35])
+    >>> if success:
+    ...     print("Preprocessing complete!")
+    """
     
     total_timer = Timer()
     total_timer.__enter__()
     
-    # Prompt for date
-    date_str = prompt_for_date()
-    if date_str is None:
-        print("\nCancelled.")
-        return False
+    # Format date string
+    date_str = f"{year:04d}-{month:02d}-{day:02d}"
     
-    print(f"\n✓ Selected date: {date_str}")
+    if verbose:
+        print(f"\n✓ Preprocessing for date: {date_str}")
     
-    # Get HDF files for that date (all sequences)
+    # Get HDF files for that date
     files_by_seq = get_hdf_files_for_date(date_str)
     
     if not files_by_seq:
-        logger.error(f"No sequences found for {date_str}")
+        if verbose:
+            logger.error(f"No sequences found for {date_str}")
         return False
     
-    logger.info(f"Found {len(files_by_seq)} sequence(s)")
+    if verbose:
+        logger.info(f"Found {len(files_by_seq)} sequence(s) available")
     
-    # Prompt for sequences
-    selected_seqs = prompt_for_sequences(files_by_seq, date_str)
-    if selected_seqs is None:
-        print("\nCancelled.")
-        return False
-    
-    print(f"\n✓ Will process {len(selected_seqs)} sequence(s)")
+    # Select sequences
+    if sequences is None:
+        # Use all available sequences
+        selected_seqs = files_by_seq
+        if verbose:
+            logger.info(f"No sequences specified, processing all {len(selected_seqs)} available")
+    else:
+        # Filter to requested sequences
+        selected_seqs = {seq: files_by_seq[seq] for seq in sequences if seq in files_by_seq}
+        
+        # Check for missing sequences
+        missing = [seq for seq in sequences if seq not in files_by_seq]
+        if missing:
+            if verbose:
+                logger.warning(f"Requested sequences not found: {missing}")
+        
+        if not selected_seqs:
+            if verbose:
+                logger.error(f"None of the requested sequences {sequences} found for {date_str}")
+            return False
+        
+        if verbose:
+            logger.info(f"Processing {len(selected_seqs)} requested sequence(s): {sorted(selected_seqs.keys())}")
     
     # Count total files
     total_files = sum(len(files) for files in selected_seqs.values())
-    print(f"  Total files: {total_files}")
+    if verbose:
+        print(f"  Total files: {total_files}\n")
     
-    # Confirm before processing
-    confirm = input("\nProceed with analysis? (y/n): ").strip().lower()
-    if confirm != 'y':
-        print("Cancelled.")
-        return False
+    # Proceed with processing (no confirmation needed when called programmatically)
+    return _process_sequences(selected_seqs, date_str, total_timer, verbose)
+
+
+def _process_sequences(selected_seqs, date_str, total_timer, verbose=True):
+    """
+    Internal function to process sequences (extracted from main() for code reuse).
+    
+    Parameters
+    ----------
+    selected_seqs : dict
+        Dictionary mapping sequence numbers to file lists
+    date_str : str
+        Date string in format YYYY-MM-DD
+    total_timer : Timer
+        Timer object for tracking total execution time
+    verbose : bool
+        If True, print status messages
+    
+    Returns
+    -------
+    bool
+        True if successful, False otherwise
+    """
+    
+    # Count total files
+    total_files = sum(len(files) for files in selected_seqs.values())
     
     # Initialize consolidation DataFrames (one per sequence)
     logger.info(f"\n{'='*60}")
@@ -895,11 +965,62 @@ def main():
     return total_success == total_files
 
 
+def main():
+    """
+    Interactive main entry point for command-line usage.
+    
+    This function prompts the user for date and sequence selection,
+    then runs the preprocessing analysis.
+    """
+    
+    total_timer = Timer()
+    total_timer.__enter__()
+    
+    # Prompt for date
+    date_str = prompt_for_date()
+    if date_str is None:
+        print("\nCancelled.")
+        return False
+    
+    print(f"\n✓ Selected date: {date_str}")
+    
+    # Get HDF files for that date (all sequences)
+    files_by_seq = get_hdf_files_for_date(date_str)
+    
+    if not files_by_seq:
+        logger.error(f"No sequences found for {date_str}")
+        return False
+    
+    logger.info(f"Found {len(files_by_seq)} sequence(s)")
+    
+    # Prompt for sequences
+    selected_seqs = prompt_for_sequences(files_by_seq, date_str)
+    if selected_seqs is None:
+        print("\nCancelled.")
+        return False
+    
+    print(f"\n✓ Will process {len(selected_seqs)} sequence(s)")
+    
+    # Count total files
+    total_files = sum(len(files) for files in selected_seqs.values())
+    print(f"  Total files: {total_files}")
+    
+    # Confirm before processing
+    confirm = input("\nProceed with analysis? (y/n): ").strip().lower()
+    if confirm != 'y':
+        print("Cancelled.")
+        return False
+    
+    # Process with interactive prompts (verbose=True for command-line usage)
+    return _process_sequences(selected_seqs, date_str, total_timer, verbose=True)
+
+
 if __name__ == '__main__':
     try:
         success = main()
         sys.exit(0 if success else 1)
     except Exception as e:
         logger.error(f"Fatal error: {e}")
+
         traceback.print_exc()
         sys.exit(1)

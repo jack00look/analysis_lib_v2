@@ -1,0 +1,20 @@
+article_description: KZ detuning scan analysis
+article_name: KZ_det_scan
+datasets: []
+shared_params:
+  NUM_SECTIONS: 300
+  SHOT_FILTER_CONFIG:
+    apply_back_check: true
+    apply_probe_norm_err_check: true
+    apply_sat_check: true
+    back_threshold: 0.001
+    enabled: true
+    ntot_threshold: 7.0e5
+    probe_norm_err_threshold: 0.1
+    sat_threshold: 1.0
+  SIGMA_Z_LOCAL_AVG: 1.0
+  SIGMA_Z_LOCAL_FLUCT: 1.0
+  WATERFALL_DENSITY_CLIM: null
+  WATERFALL_MAG_CLIM:
+  - -1.0
+  - 1.0

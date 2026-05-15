@@ -4,7 +4,7 @@ MODE_CONFIG = {
     'scan': 'ARP_Backward',
     'data_origin': 'show_ODs_v2',
     'magnetization_modality': 'vert1_two_component',
-    'constraints': None,
+    'constraints': None,  # Constrain to Rabi frequency of 800 Hz
     'average': True,
     'plots': {
         'main_waterfall': True,
@@ -16,6 +16,7 @@ MODE_CONFIG = {
         'corr_mag_density': False,
         'evolution_plots': False,
         'used_region_density_fluctuations': False,
+        'all_shots_waterfall': False,
     },
     'globals_in_title': [
         ('ARP_omega_rabi', 'Hz'),

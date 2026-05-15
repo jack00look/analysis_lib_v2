@@ -1,0 +1,12 @@
+defect_analysis:
+  defect_position_hist_half_window_um: 4.0
+  defect_size_hist_bin_size: 5.0
+  derivative_threshold: 0.0
+  derivative_threshold_neg: -0.1
+  derivative_threshold_pos: 0.1
+  gaussian_sigma: 1.5
+  min_same_sign_peak_distance_um: 10.0
+  peak_step_filter_enabled: true
+  peak_step_filter_min_abs_delta_m: 0.4
+  peak_step_filter_window_px: 4
+  zero_crossing_min_distance_um: 3.0

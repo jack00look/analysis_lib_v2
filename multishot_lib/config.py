@@ -19,11 +19,11 @@ BACKGROUND_CONTAMINATION_THRESHOLD = 0.001
 
 # Maximum allowed saturation in atom image (fraction of atoms in saturated region)
 # Typical: 0.05 (5%) to 0.1 (10%)
-SATURATION_THRESHOLD = 0.05
+SATURATION_THRESHOLD = 0.02
 
 # Maximum allowed probe normalization error
 # Typical: 0.05 (5%) to 0.15 (15%)
-PROBE_NORM_ERROR_THRESHOLD = 0.1
+PROBE_NORM_ERROR_THRESHOLD = 0.03
 
 # ============================================================================
 # DMD Validation

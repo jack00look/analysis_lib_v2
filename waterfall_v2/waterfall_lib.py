@@ -11,6 +11,7 @@ from waterfall_v2.defect_finding_lib import (
     normalize_defect_config,
     find_defects_in_profile,
 )
+from waterfall_v2.plot_settings_manager import get_plot_manager
 # Create a module-like object for compatibility
 class DefectLib:
     DEFAULT_DEFECT_CONFIG = DEFAULT_DEFECT_CONFIG
@@ -256,6 +257,90 @@ def filter_valid_feedback_shots(df):
 
     print(f'DMD feedback: keeping {np.count_nonzero(mask)}/{n} shots.')
     return df[mask]
+
+
+def save_sigmoid_center_interpolation(M_data, x_um, y_vals, y_axis_label, um_per_px, params):
+    """
+    Extract sigmoid centers from magnetization profiles and save interpolation to file.
+    
+    Analyzes the spatial magnetization profile at different y-values (scan parameter),
+    extracts the sigmoid center position for each y, and saves interpolated profile to:
+        waterfall_v2/sigmoid_center_interpolation.txt
+    
+    Parameters
+    ----------
+    M_data : ndarray
+        Magnetization data, shape (n_shots, n_pixels) if averaged or (n_y_values, n_pixels)
+    x_um : ndarray
+        X-axis positions in micrometers
+    y_vals : ndarray
+        Y-axis values (scan parameter values)
+    y_axis_label : str
+        Label for y-axis (e.g., 'ARPB_final_set_field')
+    um_per_px : float
+        Micrometers per pixel
+    params : dict
+        Parameters dictionary (unused but kept for compatibility)
+    """
+    try:
+        if M_data is None or len(M_data) == 0:
+            print("Warning: No magnetization data to extract sigmoid centers from")
+            return
+        
+        if len(M_data) < 2:
+            print("Warning: Need at least 2 y-values to interpolate sigmoid centers")
+            return
+        
+        # Ensure data is 2D
+        M_data = np.atleast_2d(M_data)
+        if M_data.shape[0] < len(y_vals):
+            M_data = M_data.T
+        
+        # Extract sigmoid center for each profile
+        sigmoid_centers_x = []
+        sigmoid_centers_y = []
+        
+        for i, (m_profile, y_val) in enumerate(zip(M_data, y_vals)):
+            if len(m_profile) < 5:
+                continue
+            
+            # Find magnetization extrema (where derivative is closest to zero on both sides)
+            m_smooth = gaussian_filter1d(m_profile, sigma=2)
+            
+            # Find the center as the position of maximum absolute value
+            max_idx = np.argmax(np.abs(m_smooth))
+            if 5 <= max_idx < len(m_profile) - 5:
+                sigmoid_centers_x.append(x_um[max_idx] if max_idx < len(x_um) else max_idx * um_per_px)
+                sigmoid_centers_y.append(float(y_val))
+        
+        if len(sigmoid_centers_x) < 2:
+            print("Warning: Could not extract at least 2 sigmoid centers")
+            return
+        
+        # Sort by x position
+        sorted_pairs = sorted(zip(sigmoid_centers_x, sigmoid_centers_y))
+        section_centers_x = np.array([p[0] for p in sorted_pairs])
+        sigmoid_centers_y_sorted = np.array([p[1] for p in sorted_pairs])
+        
+        # Create interpolation function
+        kind = 'cubic' if len(section_centers_x) >= 4 else 'linear'
+        interp_func = interp1d(section_centers_x, sigmoid_centers_y_sorted, kind=kind, fill_value='extrapolate')
+        
+        # Generate smooth x values for interpolation
+        x_smooth = np.linspace(min(section_centers_x), max(section_centers_x), 200)
+        y_smooth = interp_func(x_smooth)
+        
+        # Save to text file in waterfall_v2 script directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        output_file = os.path.join(script_dir, 'sigmoid_center_interpolation.txt')
+        
+        header = f"# Interpolated sigmoid center profile\n# x (um) vs {y_axis_label} (sigmoid center)\n# Interpolation type: {kind}\n"
+        data_to_save = np.column_stack((x_smooth, y_smooth))
+        np.savetxt(output_file, data_to_save, header=header, fmt='%.6f', delimiter='\t', comments='')
+        print(f"✓ Saved sigmoid center interpolation to: {output_file}")
+        
+    except Exception as e:
+        print(f"Warning: Error in save_sigmoid_center_interpolation: {e}")
 
 
 def _load_camera_settings_module():
@@ -1714,15 +1799,24 @@ def plot_main_waterfall(
         ax_corr.grid(True, alpha=0.3)
 
 
-def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_per_px, params=None):
+def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_per_px, params=None, mode_cfg=None):
     from scipy.optimize import curve_fit
 
     if params is None:
         params = {}
+    if mode_cfg is None:
+        mode_cfg = {}
     x_min_um = params.get('X_MIN_INTEGRATION', 900)
     x_max_um = params.get('X_MAX_INTEGRATION', 1200)
     
-    fig_fluct, ax_fluct = plt.subplots()
+    plot_manager = get_plot_manager()
+    
+    # Create named figures instead of auto-numbered ones
+    fig_fluct = plt.figure('bubbles_evolution_fluctuations')
+    fig_fluct.clear()
+    ax_fluct = fig_fluct.add_subplot(111)
+    plot_manager.register_figure('bubbles_evolution_fluctuations', fig_fluct)
+    
     z_fluc_smooth = gaussian_filter1d(z_local_fluctuations, sigma=2, axis=0)
     start_idx, end_idx = int(round(x_min_um / um_per_px)), int(round(x_max_um / um_per_px))
     x_axis_pixels = np.arange(start_idx, end_idx)
@@ -1733,8 +1827,16 @@ def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_pe
     ax_fluct.set_xlabel('x [μm]')
     ax_fluct.invert_yaxis()
     plt.colorbar(im_fluct, ax=ax_fluct)
+    
+    # Apply previously saved settings if they exist and enable autosave
+    plot_manager.apply_settings('bubbles_evolution_fluctuations', ax_fluct)
+    plot_manager.enable_autosave('bubbles_evolution_fluctuations', ax_fluct)
 
-    fig_evol, ax_evol = plt.subplots()
+    fig_evol = plt.figure('bubbles_evolution_magnetization')
+    fig_evol.clear()
+    ax_evol = fig_evol.add_subplot(111)
+    plot_manager.register_figure('bubbles_evolution_magnetization', fig_evol)
+    
     m_copy = np.copy(M)[:, start_idx:end_idx] ** 2
     m_copy = gaussian_filter1d(m_copy, sigma=2, axis=1)
     x_evol_mesh = x_axis_mesh
@@ -1743,6 +1845,12 @@ def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_pe
     ax_evol.set_xlabel('x [μm]')
     ax_evol.set_title('Magnetization evolution in the used region')
     ax_evol.invert_yaxis()
+    
+    # Apply previously saved settings if they exist and enable autosave
+    plot_manager.apply_settings('bubbles_evolution_magnetization', ax_evol)
+    plot_manager.enable_autosave('bubbles_evolution_magnetization', ax_evol)
+    
+    plt.colorbar(im_evol, ax=ax_evol)
     
     # Compute sigmoid centers for each vertical line (time slice) in the used region
     def sigmoid(x, x0, k, a, b):
@@ -1815,8 +1923,13 @@ def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_pe
             velocity_slope = coeffs[0]  # dt/dx in ms/meter
             velocity_um_ms = 1e6 / velocity_slope if velocity_slope != 0 else float('inf')  # um/ms
             
-            # Create domain wall velocity plot
-            fig_dw, ax_dw = plt.subplots(figsize=(8, 5), tight_layout=True)
+            # Create domain wall velocity plot with named figure
+            fig_dw = plt.figure('bubbles_evolution_domain_wall')
+            fig_dw.clear()
+            ax_dw = fig_dw.add_subplot(111)
+            ax_dw.set_figsize = (8, 5)
+            plot_manager.register_figure('bubbles_evolution_domain_wall', fig_dw)
+            
             ax_dw.scatter(filtered_x * 1e6, filtered_t, color='red', s=50, alpha=0.5, label='All data points')
             ax_dw.scatter(filtered_x_clean * 1e6, filtered_t_clean, color='darkred', s=50, label='Kept points (within 1σ)')
             
@@ -1831,6 +1944,10 @@ def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_pe
             ax_dw.grid(True, alpha=0.3)
             ax_dw.legend()
             
+            # Apply previously saved settings and enable autosave
+            plot_manager.apply_settings('bubbles_evolution_domain_wall', ax_dw)
+            plot_manager.enable_autosave('bubbles_evolution_domain_wall', ax_dw)
+            
             # Calculate and print domain wall speed in um/ms
             n_rejected = len(filtered_x) - len(filtered_x_clean)
             print(f"Domain wall: rejected {n_rejected}/{len(filtered_x)} points outside 2σ (σ={sigma_residuals:.6g})")
@@ -1843,6 +1960,236 @@ def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_pe
             return coeffs, filtered_x_clean, filtered_t_clean
     
     return None, None, None
+
+
+def plot_all_shots_waterfall(M_full, grouped_indices, grouped_y, y_axis_col, seqs, um_per_px, params, plot_manager=None):
+    """
+    Plot all individual shots as a waterfall with domain wall detection and bubbles_time separators.
+    
+    Parameters
+    ----------
+    M_full : array
+        Full magnetization data (n_shots, n_pixels)
+    grouped_indices : list
+        List of indices for each group (by bubbles_time or scan variable)
+    grouped_y : list
+        Y-axis values for each group
+    y_axis_col : str
+        Name of y-axis column (e.g., 'bubbles_time')
+    seqs : list
+        Sequence indices
+    um_per_px : float
+        Micrometers per pixel
+    params : dict
+        Parameter dictionary with X_MIN_INTEGRATION, X_MAX_INTEGRATION, etc.
+    plot_manager : PlotSettingsManager, optional
+        Settings manager for persistence
+    """
+    if plot_manager is None:
+        plot_manager = get_plot_manager()
+    
+    fig_raw = plt.figure('all_shots_waterfall')
+    fig_raw.clear()
+    ax_raw = fig_raw.add_subplot(111)
+    plot_manager.register_figure('all_shots_waterfall', fig_raw)
+    
+    try:
+        fig_raw.set_tight_layout(False)
+    except Exception:
+        pass
+    try:
+        fig_raw.set_constrained_layout(False)
+    except Exception:
+        pass
+    fig_raw.subplots_adjust(left=0.09, right=0.84, bottom=0.10, top=0.92)
+    cax_raw = fig_raw.add_axes([0.90, 0.10, 0.018, 0.82])
+    
+    raw_vmin = -1.0 if params.get('WATERFALL_MAG_CLIM') is None else params['WATERFALL_MAG_CLIM'][0]
+    raw_vmax = 1.0 if params.get('WATERFALL_MAG_CLIM') is None else params['WATERFALL_MAG_CLIM'][1]
+    
+    x_centers_um_bub = np.arange(M_full.shape[1]) * um_per_px
+    x_min_um_bub = float(params['X_MIN_INTEGRATION'])
+    x_max_um_bub = float(params['X_MAX_INTEGRATION'])
+    
+    # Detect domain walls for each shot
+    gaussian_sigma_um = 3.0
+    deriv_threshold = 0.03
+    dw_left_x = []
+    dw_right_x = []
+    
+    for shot_idx in range(len(M_full)):
+        m_profile = np.asarray(M_full[shot_idx], dtype=float)
+        
+        if gaussian_sigma_um > 0:
+            gaussian_sigma_px = gaussian_sigma_um / um_per_px
+            m_smooth = gaussian_filter1d(m_profile, sigma=gaussian_sigma_px)
+        else:
+            m_smooth = m_profile
+        
+        m_deriv = np.gradient(m_smooth)
+        
+        idx_min = int(np.argmin(np.abs(x_centers_um_bub - x_min_um_bub)))
+        idx_max = int(np.argmin(np.abs(x_centers_um_bub - x_max_um_bub)))
+        if idx_max < idx_min:
+            idx_min, idx_max = idx_max, idx_min
+        
+        left_wall_x = None
+        if idx_min < len(m_deriv):
+            for i in range(idx_min, min(idx_max, len(m_deriv))):
+                if m_deriv[i] <= -deriv_threshold:
+                    left_wall_x = float(x_centers_um_bub[i])
+                    break
+        
+        right_wall_x = None
+        if idx_max < len(m_deriv):
+            for i in range(idx_max, max(idx_min - 1, -1), -1):
+                if m_deriv[i] >= deriv_threshold:
+                    right_wall_x = float(x_centers_um_bub[i])
+                    break
+        
+        dw_left_x.append(left_wall_x)
+        dw_right_x.append(right_wall_x)
+    
+    im_raw = ax_raw.imshow(
+        M_full,
+        aspect='auto',
+        cmap='RdBu',
+        interpolation='nearest',
+        resample=False,
+        vmin=raw_vmin,
+        vmax=raw_vmax,
+        extent=[float(x_centers_um_bub[0]), float(x_centers_um_bub[-1]), float(len(M_full)) + 0.5, 0.5],
+    )
+    ax_raw.set_xlabel(r'$\mu m$')
+    ax_raw.set_ylabel(f'shot index (ordered by {y_axis_col})')
+    ax_raw.set_title(f'Raw magnetization waterfall ordered by {y_axis_col} (seqs: {seqs})')
+    ax_raw.set_xlim(float(x_centers_um_bub[0]), float(x_centers_um_bub[-1]))
+    ax_raw.set_ylim(float(len(M_full)) + 0.5, 0.5)
+    ax_raw.set_autoscale_on(False)
+    ax_raw.axvline(x=float(x_min_um_bub), color='lime', linestyle='--', linewidth=2.2, alpha=0.95)
+    ax_raw.axvline(x=float(x_max_um_bub), color='lime', linestyle='--', linewidth=2.2, alpha=0.95)
+    
+    # Draw detected domain walls
+    for shot_idx in range(len(M_full)):
+        y_shot = float(shot_idx + 1)
+        if dw_left_x[shot_idx] is not None:
+            ax_raw.plot(dw_left_x[shot_idx], y_shot, 'o', color='green', markersize=4, alpha=0.8, zorder=15)
+        if dw_right_x[shot_idx] is not None:
+            ax_raw.plot(dw_right_x[shot_idx], y_shot, 's', color='violet', markersize=4, alpha=0.8, zorder=15)
+    
+    # Add separators between different scan variable values
+    if len(grouped_indices) > 0:
+        x_left = float(x_centers_um_bub[0])
+        x_right = float(x_centers_um_bub[-1])
+        x_text = x_left + 0.012 * (x_right - x_left)
+        
+        start = 0
+        centers = []
+        for time_val, g in zip(grouped_y, grouped_indices):
+            end = start + len(g)
+            y_start = float(start) + 0.5
+            y_end = float(end) + 0.5
+            y_center = 0.5 * (y_start + y_end)
+            centers.append(y_center)
+            
+            if start > 0:
+                sep_half_height = 0.42
+                ax_raw.axhspan(
+                    y_start - sep_half_height,
+                    y_start + sep_half_height,
+                    facecolor='white',
+                    edgecolor='none',
+                    zorder=19,
+                )
+            
+            try:
+                time_txt = f"{float(time_val):.6g}"
+            except Exception:
+                time_txt = str(time_val)
+            
+            ax_raw.text(
+                x_text,
+                y_center,
+                f'{y_axis_col}={time_txt}',
+                color='white',
+                fontsize=8,
+                va='center',
+                ha='left',
+                bbox=dict(facecolor='black', alpha=0.35, edgecolor='none', pad=1.5),
+                zorder=20,
+            )
+            start = end
+        
+        ax_time_ticks = ax_raw.secondary_yaxis('right', functions=(lambda y: y, lambda y: y))
+        ax_time_ticks.set_yticks(centers)
+        try:
+            ax_time_ticks.set_yticklabels([f'{float(v):.6g}' for v in grouped_y], fontsize=8)
+        except Exception:
+            ax_time_ticks.set_yticklabels([str(v) for v in grouped_y], fontsize=8)
+        ax_time_ticks.set_ylabel(y_axis_col)
+        ax_time_ticks.grid(False)
+    
+    cbar_raw = fig_raw.colorbar(im_raw, cax=cax_raw)
+    cbar_raw.set_label('magnetization m')
+    
+    # Apply previously saved settings and enable autosave
+    plot_manager.apply_settings('all_shots_waterfall', ax_raw)
+    plot_manager.enable_autosave('all_shots_waterfall', ax_raw)
+    
+    # Plot domain wall positions as a function of scan variable
+    fig_dw = plt.figure('all_shots_domain_walls')
+    fig_dw.clear()
+    ax_dw = fig_dw.add_subplot(111)
+    plot_manager.register_figure('all_shots_domain_walls', fig_dw)
+    
+    dw_times = []
+    dw_left_mean = []
+    dw_left_sem = []
+    dw_right_mean = []
+    dw_right_sem = []
+    dw_left_all = []
+    dw_left_times_all = []
+    dw_right_all = []
+    dw_right_times_all = []
+    
+    for time_val, idx_group in zip(grouped_y, grouped_indices):
+        dw_left_group = [dw_left_x[i] for i in idx_group if dw_left_x[i] is not None]
+        dw_right_group = [dw_right_x[i] for i in idx_group if dw_right_x[i] is not None]
+        
+        if len(dw_left_group) > 0:
+            dw_times.append(float(time_val))
+            dw_left_mean.append(np.mean(dw_left_group))
+            dw_left_sem.append(np.std(dw_left_group) / np.sqrt(len(dw_left_group)))
+            dw_left_all.extend(dw_left_group)
+            dw_left_times_all.extend([float(time_val)] * len(dw_left_group))
+        
+        if len(dw_right_group) > 0:
+            if float(time_val) not in dw_times:
+                dw_times.append(float(time_val))
+            dw_right_mean.append(np.mean(dw_right_group))
+            dw_right_sem.append(np.std(dw_right_group) / np.sqrt(len(dw_right_group)))
+            dw_right_all.extend(dw_right_group)
+            dw_right_times_all.extend([float(time_val)] * len(dw_right_group))
+    
+    if len(dw_left_all) > 0:
+        ax_dw.scatter(dw_left_times_all, dw_left_all, alpha=0.5, s=30, label='Left wall (individual)', color='green')
+    if len(dw_right_all) > 0:
+        ax_dw.scatter(dw_right_times_all, dw_right_all, alpha=0.5, s=30, label='Right wall (individual)', color='violet')
+    
+    if len(dw_left_mean) > 0:
+        ax_dw.errorbar(dw_times[:len(dw_left_mean)], dw_left_mean, yerr=dw_left_sem, fmt='o-', label='Left wall (mean±SEM)', color='green', linewidth=2, markersize=6)
+    if len(dw_right_mean) > 0:
+        ax_dw.errorbar(dw_times[:len(dw_right_mean)], dw_right_mean, yerr=dw_right_sem, fmt='s-', label='Right wall (mean±SEM)', color='violet', linewidth=2, markersize=6)
+    
+    ax_dw.set_xlabel(y_axis_col)
+    ax_dw.set_ylabel('Domain wall position (μm)')
+    ax_dw.set_title('Domain wall evolution')
+    ax_dw.legend()
+    ax_dw.grid(True, alpha=0.3)
+    
+    # Apply previously saved settings and enable autosave
+    plot_manager.apply_settings('all_shots_domain_walls', ax_dw)
+    plot_manager.enable_autosave('all_shots_domain_walls', ax_dw)
 
 
 def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, average=False, title_labels=None, globals_in_title=None, params=None, plot_flags=None, mode_cfg=None):
@@ -3073,7 +3420,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
     # Get domain wall fit data before creating main plot
     dw_fit_coeffs, dw_fit_x, dw_fit_t = None, None, None
     if plot_flags.get('evolution_plots', False) and scan == 'bubbles_evolution':
-        dw_fit_coeffs, dw_fit_x, dw_fit_t = plot_evolution_analysis(y_final, y_axis_col, z_fluc_final, M_final, um_per_px, params)
+        dw_fit_coeffs, dw_fit_x, dw_fit_t = plot_evolution_analysis(y_final, y_axis_col, z_fluc_final, M_final, um_per_px, params, mode_cfg)
 
     if plot_flags.get('main_waterfall', True):
         title_full = f"{title_base}\n{'AVERAGED' if average else 'UNIQUE'}\n(seqs: {seqs})"
@@ -3141,6 +3488,19 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                 dw_fit_coeffs=dw_fit_coeffs,
                 dw_fit_x=dw_fit_x,
                 dw_fit_t=dw_fit_t,
+            )
+        
+        # For bubbles_evolution, plot all individual shots with domain wall detection
+        if scan == 'bubbles_evolution' and plot_flags.get('all_shots_waterfall', False) and len(M_full) > 0:
+            plot_all_shots_waterfall(
+                M_full,
+                grouped_indices,
+                grouped_y,
+                y_axis_col,
+                seqs,
+                um_per_px,
+                params,
+                plot_manager=plot_manager if 'plot_manager' in locals() else None,
             )
         
         # For bubbles_evolution, create additional waterfall with minimum magnetization selection
@@ -3246,6 +3606,21 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             um_per_px,
             mode_cfg=mode_cfg,
         )
+
+    # Save sigmoid center interpolation (extract from averaged magnetization profile)
+    # Only save if sectioned_sigmoid plot is enabled
+    if plot_flags.get('sectioned_sigmoid', False):
+        try:
+            save_sigmoid_center_interpolation(
+                M_final if average else M_full,
+                x_plot_um,
+                y_final if average else y_raw,
+                y_axis_label,
+                um_per_px,
+                params,
+            )
+        except Exception as e:
+            print(f"Warning: Could not save sigmoid center interpolation: {e}")
 
     plt.show()
 

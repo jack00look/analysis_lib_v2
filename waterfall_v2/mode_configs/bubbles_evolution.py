@@ -16,6 +16,12 @@ MODE_CONFIG = {
         'corr_mag_density': False,
         'evolution_plots': True,
         'used_region_density_fluctuations': False,
+        'all_shots_waterfall': True,  # Set to True to show all individual shots with domain wall detection
     },
     'globals_in_title': [],
+    # Domain wall velocity fit range (starting and ending points for linear fit)
+    'dw_fit_x_start': None,  # Will be set by analysis, starting x position (μm)
+    'dw_fit_x_end': None,    # Will be set by analysis, ending x position (μm)
+    'dw_fit_t_start': 29.,  # Will be set by analysis, starting time (ms)
+    'dw_fit_t_end': 81.,    # Will be set by analysis, ending time (ms)
 }

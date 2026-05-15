@@ -52,12 +52,13 @@ def BEC_fit_hor(h5file,show=True):
         out_x = imaging_analysis_lib_mod.do_fit_1D(n1D_x,x_vals,J_BimodalBose1DModel2Centers_FlatTop,key + 'xfit_',ax[2*i+1,1])
         out_y = imaging_analysis_lib_mod.do_fit_1D(n1D_y,y_vals,J_BimodalBose1DModel2Centers_FlatTop,key + 'yfit_',ax[2*i,0],invert=True)
 
-        # get the parameters from the fits in a dictionary
-        dict.update(out_x.params.valuesdict())
-        dict.update(out_y.params.valuesdict())
+        # get the parameters from the fits in a dictionary with v2_flat suffix
+        dict_flattop = {k + '_flat': v for k, v in out_x.params.valuesdict().items()}
+        dict_flattop.update({k + '_flat': v for k, v in out_y.params.valuesdict().items()})
+        dict.update(dict_flattop)
 
     fig,ax = plt.subplots(2*len(keys),2,figsize=(10*len(keys),10),constrained_layout=True)
-    dict = {}
+    #dict = {}
     for i,key in enumerate(keys):
         # get the image and the ODlog image for the key
         n2D,n1D_x,n1D_y,x_vals,y_vals = imaging_analysis_lib_mod.extract_images_parts(dict_images,cam,key)

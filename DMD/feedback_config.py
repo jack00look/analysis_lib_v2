@@ -25,7 +25,7 @@ DENSITY_CONFIG = {
     'program_name': 'Do_BEC_DMD_feedback',
     'n_threshold': 2e5,             # Minimum atom number for feedback
     'kp': 1.5e-4,                    # Proportional gain
-    'smoothing_sigma': 3.,        # Gaussian smoothing sigma for error signal
+    'smoothing_sigma': 5.,        # Gaussian smoothing sigma for error signal
 }
 
 # =============================================================================

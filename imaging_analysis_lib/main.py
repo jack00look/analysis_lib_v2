@@ -326,6 +326,9 @@ def calculate_OD(atoms, probe, cam, back = None, roi_background=None,alpha = Non
         OD_log = OD_log_bare * alpha * (1 + (2*detuning)**2)
         OD_lin = (probe -  atoms) / (chi_sat * pulse_time)
         n_2D = (OD_log + OD_lin)/sigma
+        
+        # Clip negative values to zero (noise from background subtraction)
+        n_2D = np.maximum(n_2D, 0)
 
         OD_lin_sum = np.sum(OD_lin)
         OD_log_sum = np.sum(OD_log)

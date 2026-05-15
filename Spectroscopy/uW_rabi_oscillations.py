@@ -24,7 +24,7 @@ def F_rabi_oscillations(t_pulse,delta,f_rabi,tau_decoherence,amp,offset, phi):
 
 rabi_model = Model(F_rabi_oscillations, independent_vars=['t_pulse'],nan_policy='omit' )
 
-seqs = [[93,94]]
+seqs = [[42]]
 
 if __name__ == '__main__':
     try:
@@ -82,11 +82,11 @@ if __name__ == '__main__':
 
             params = rabi_model.make_params()
             params['delta'].set(value=0.00,vary=False)
-            params['f_rabi'].set(value=300.135,vary=True, min=0,max = 2e5)
-            params['amp'].set(value=1., vary=False, min=0., max=2.)
+            params['f_rabi'].set(value=10000.135,vary=True, min=0,max = 2e5)
+            params['amp'].set(value=1., vary=True, min=0., max=2.)
             params['offset'].set(value=0., vary=False,min = -1., max=1.)
-            params['phi'].set(value=-np.pi, vary=False)
-            params['tau_decoherence'].set(value=30e-3, vary=True,min=1e-4, max=1e8)
+            params['phi'].set(value=-np.pi, vary=True)
+            params['tau_decoherence'].set(value=230e-6, vary=True,min=1e-6, max=1e8)
             ind_sorted = np.argsort(t_pulse_vals)
             t_pulse_vals = t_pulse_vals[ind_sorted]
             y_M_vals = y_M_vals[ind_sorted]
@@ -104,7 +104,7 @@ if __name__ == '__main__':
             fit = rabi_model.fit(y_M_vals, t_pulse=t_pulse_vals, params=params)
             best_params = fit.params
             print(fit.fit_report()) 
-            fit_label = 'FIT f_rabi: {:.2f} Hz, tau: {:.2f}, delta: {:.2f} mG'.format(fit.params['f_rabi'].value, fit.params['tau_decoherence'].value,fit.params['delta'].value)
+            fit_label = 'FIT f_rabi: {:.2f} Hz, tau [ms]: {:.3f}, delta: {:.2f} mG'.format(fit.params['f_rabi'].value, fit.params['tau_decoherence'].value*1e3,fit.params['delta'].value)
 
             ax.plot(tpulse_plot, fit.eval(t_pulse=tpulse_plot,params=best_params), ls = '-', color=colors[seqs.index(s)],label = fit_label)
         

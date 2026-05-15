@@ -110,6 +110,9 @@ class ProfileEditor:
             facecolor='wheat', alpha=0.8), fontsize=10, family='monospace'
         )
         
+        # Initialize edit mode before setting up sliders
+        self.edit_mode = 'set'  # 'set' or 'reduce'
+        
         # Setup sliders for editing
         self._setup_sliders()
         
@@ -120,7 +123,8 @@ class ProfileEditor:
         instruction_text = (
             "INSTRUCTIONS:\n"
             "• Click on the profile to select a point (or region) for editing\n"
-            "• Use the Value slider to set the intensity of the selected point(s)\n"
+            "• Choose 'Set Value' or 'Reduce By' mode using the radio buttons\n"
+            "• Use the Value slider to set intensity or choose reduction amount\n"
             "• Use the Selection Width slider to broaden/narrow the selection region\n"
             "• Click 'Apply & Load' to send to DMD\n"
             "• Click 'Reset' to restore original profile"
@@ -172,8 +176,28 @@ class ProfileEditor:
                                linewidth=2, alpha=0.7)
     
     def _setup_sliders(self):
-        """Setup sliders for profile editing."""
+        """Setup sliders and mode selection for profile editing."""
         slider_height = 0.03
+
+        # Mode selection radio buttons
+        ax_mode_set = plt.axes([0.15, 0.14, 0.08, 0.03])
+        ax_mode_reduce = plt.axes([0.30, 0.14, 0.08, 0.03])
+        
+        btn_mode_set = plt.Button(ax_mode_set, 'Set Value', hovercolor='0.975', 
+                                  color='lightblue')
+        btn_mode_reduce = plt.Button(ax_mode_reduce, 'Reduce By', hovercolor='0.975',
+                                    color='lightgray')
+        
+        self.mode_buttons = {'set': (btn_mode_set, ax_mode_set), 
+                             'reduce': (btn_mode_reduce, ax_mode_reduce)}
+        
+        btn_mode_set.on_clicked(lambda event: self.set_edit_mode('set'))
+        btn_mode_reduce.on_clicked(lambda event: self.set_edit_mode('reduce'))
+        self._update_mode_button_colors()
+        
+        # Mode label
+        self.ax_profile.text(0.15, 0.185, 'Edit Mode:', transform=self.ax_profile.transAxes,
+                            fontsize=10, fontweight='bold')
 
         # Value slider
         ax_value = plt.axes([0.15, 0.08, 0.55, slider_height])
@@ -237,10 +261,12 @@ class ProfileEditor:
             self.selection_span = self.ax_profile.axvspan(
                 x_min_sel, x_max_sel, alpha=0.3, color='yellow', zorder=2
             )
-            mean_val = float(np.mean(self.profile_y[self.selected_indices]))
-            self._updating_selection = True
-            self.slider_value.set_val(np.clip(mean_val, 0.0, 1.0))
-            self._updating_selection = False
+            # Only update slider to mean value in 'set' mode
+            if self.edit_mode == 'set':
+                mean_val = float(np.mean(self.profile_y[self.selected_indices]))
+                self._updating_selection = True
+                self.slider_value.set_val(np.clip(mean_val, 0.0, 1.0))
+                self._updating_selection = False
 
         self.update_stats()
         self.fig.canvas.draw()
@@ -249,6 +275,30 @@ class ProfileEditor:
         """Re-apply selection when resolution slider changes."""
         if self.click_x_um is not None:
             self._update_selection(self.click_x_um)
+
+    def set_edit_mode(self, mode):
+        """Switch between 'set' and 'reduce' edit modes."""
+        if mode not in ['set', 'reduce']:
+            return
+        self.edit_mode = mode
+        self._update_mode_button_colors()
+        print(f"Edit mode changed to: {mode.upper()}")
+        self.update_stats()
+        self.fig.canvas.draw()
+
+    def _update_mode_button_colors(self):
+        """Update button colors to show active mode."""
+        set_btn, _ = self.mode_buttons['set']
+        reduce_btn, _ = self.mode_buttons['reduce']
+        
+        if self.edit_mode == 'set':
+            set_btn.color = 'lightgreen'
+            reduce_btn.color = 'lightgray'
+        else:
+            set_btn.color = 'lightgray'
+            reduce_btn.color = 'lightyellow'
+        
+        self.fig.canvas.draw()
 
     def on_click(self, event):
         """Handle mouse click on profile."""
@@ -269,7 +319,17 @@ class ProfileEditor:
         if self._updating_selection:
             return
         if self.selected_indices:
-            self.profile_y[self.selected_indices] = val
+            if self.edit_mode == 'set':
+                # Set all selected points to the same value
+                self.profile_y[self.selected_indices] = val
+            else:  # 'reduce'
+                # Reduce each selected point by the given amount
+                self.profile_y[self.selected_indices] -= val
+                # Clamp to [0, 1]
+                self.profile_y[self.selected_indices] = np.clip(
+                    self.profile_y[self.selected_indices], 0.0, 1.0
+                )
+            
             self.line_edit.set_ydata(self.profile_y)
             self.update_stats()
             self.fig.canvas.draw()
@@ -303,16 +363,21 @@ class ProfileEditor:
         if self.selected_indices:
             n = len(self.selected_indices)
             sel_mean = float(np.mean(self.profile_y[self.selected_indices]))
-            selected_text = f"Selected ({n} pts): {sel_mean:.4f}"
+            if self.edit_mode == 'set':
+                selected_text = f"Selected ({n} pts): {sel_mean:.4f}\n(will SET to slider value)"
+            else:
+                selected_text = f"Selected ({n} pts): {sel_mean:.4f}\n(will REDUCE by slider value)"
         else:
             selected_text = "Click to select"
 
+        mode_label = f"Mode: {self.edit_mode.upper()}"
         stats_text = (
             f"Editable Region Stats:\n"
             f"Mean: {mean_val:.4f}\n"
             f"Max: {max_val:.4f}\n"
             f"Min: {min_val:.4f}\n"
-            f"{selected_text}"
+            f"{selected_text}\n"
+            f"{mode_label}"
         )
         self.stats_text.set_text(stats_text)
     

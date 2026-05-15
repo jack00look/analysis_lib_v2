@@ -1,0 +1,27 @@
+camera_settings:
+  apply_ntot_check: true
+  atoms_images:
+  - PTAI_m1
+  - PTAI_m2
+  camera_name: cam_vert1
+  data_origin: show_ODs_v2
+  magnetization_modality: vert1_two_component
+  type: two_component
+modality_config:
+  vert1_two_component:
+    affine_correction:
+      a1: 1.0
+      a2: 1.0
+      b1: 0.0
+      b2: 0.0
+      c1: 0.0
+      c2: 0.0
+    apply_ntot_check: true
+    atoms_images:
+    - PTAI_m1
+    - PTAI_m2
+    camera_name: cam_vert1
+    data_origin: show_ODs_v2
+    m1_column: null
+    m2_column: null
+    type: two_component

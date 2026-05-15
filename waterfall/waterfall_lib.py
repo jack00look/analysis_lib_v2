@@ -124,7 +124,17 @@ def _build_globals_title_lines(df, globals_in_title):
 
 def filter_dataframe(df, seqs, constraints=None, shot_name_filter=None):
     out = df[df['sequence_index'].isin(seqs)]
-    print(f"Initial shots in sequences {seqs}: {len(out)}")
+    
+    # Print per-sequence breakdown
+    print(f"\n{'='*80}")
+    print(f"SEQUENCE FILTERING BREAKDOWN")
+    print(f"{'='*80}")
+    for seq in seqs:
+        seq_count = len(df[df['sequence_index'] == seq])
+        print(f"  Sequence {seq}: {seq_count} shots")
+    print(f"Total initial shots in sequences {seqs}: {len(out)}")
+    print()
+    
     if constraints is not None:
         for key, value in constraints.items():
             before = len(out)
@@ -182,6 +192,9 @@ def filter_valid_feedback_shots(df):
     n = len(df)
     mask = np.ones(n, dtype=bool)
     status_txt = None
+    reject_count_run_time = 0
+    reject_count_load_progress = 0
+    reject_count_missing_runtime = 0
 
     if status_vals is not None:
         status_txt = np.array([_as_text(v) for v in status_vals])
@@ -190,7 +203,11 @@ def filter_valid_feedback_shots(df):
             'skipped_load_in_progress_or_no_completion_timestamp',
             'skipped_missing_run_time_global',
         }
-        mask &= ~np.isin(status_txt, list(bad))
+        bad_mask = np.isin(status_txt, list(bad))
+        reject_count_run_time = int(np.count_nonzero(status_txt == 'skipped_run_time_outside_load_window'))
+        reject_count_load_progress = int(np.count_nonzero(status_txt == 'skipped_load_in_progress_or_no_completion_timestamp'))
+        reject_count_missing_runtime = int(np.count_nonzero(status_txt == 'skipped_missing_run_time_global'))
+        mask &= ~bad_mask
 
     if updated_vals is not None:
         updated = np.array([_as_bool(v) for v in updated_vals])
@@ -199,7 +216,17 @@ def filter_valid_feedback_shots(df):
         else:
             mask &= (updated | (status_txt == 'skipped_already_used_for_feedback'))
 
-    print(f'DMD feedback: keeping {np.count_nonzero(mask)}/{n} shots.')
+    print()
+    print(f"{'='*80}")
+    print(f"DMD FEEDBACK FILTER SUMMARY")
+    print(f"{'='*80}")
+    print(f"  Initial shots: {n}")
+    print(f"  Keeping: {np.count_nonzero(mask)} shots")
+    print(f"  Rejected reasons:")
+    print(f"    ├─ Run time outside load window: {reject_count_run_time}")
+    print(f"    ├─ Load in progress / no completion timestamp: {reject_count_load_progress}")
+    print(f"    └─ Missing run time global: {reject_count_missing_runtime}")
+    print(f"{'='*80}\n")
     return df[mask]
 
 
@@ -372,7 +399,7 @@ def get_valid_rows_mask(df, filter_cfg=None, modality_cfg=None, data_origin='sho
     n_tot = _collect_sum_metric('N_atoms')
 
     good = np.ones(n, dtype=bool)
-    reject_reasons = {'background': 0, 'saturation': 0, 'probe_norm': 0, 'ntot': 0}
+    reject_reasons = {'background': 0, 'saturation': 0, 'probe_norm': 0, 'ntot': 0, 'dmd_not_updated': 0}
 
     if bool(filter_cfg.get('apply_back_check', True)):
         thr = float(filter_cfg.get('back_threshold', 0.05))
@@ -402,14 +429,22 @@ def get_valid_rows_mask(df, filter_cfg=None, modality_cfg=None, data_origin='sho
         reject_reasons['ntot'] = int(np.count_nonzero(~n_tot_ok))
         good &= n_tot_ok
 
-    print(
-        'Shot quality filter summary: '
-        f"keep={np.count_nonzero(good)}/{n}, "
-        f"reject_background={reject_reasons['background']}, "
-        f"reject_saturation={reject_reasons['saturation']}, "
-        f"reject_probe_norm={reject_reasons['probe_norm']}, "
-        f"reject_ntot={reject_reasons['ntot']}"
-    )
+    print()
+    print(f"{'='*80}")
+    print(f"SHOT QUALITY FILTER SUMMARY")
+    print(f"{'='*80}")
+    print(f"  Initial shots for filtering: {n}")
+    print(f"  After background filter:     {n - reject_reasons['background']} (rejected: {reject_reasons['background']})")
+    print(f"  After saturation filter:     {n - reject_reasons['background'] - reject_reasons['saturation']} (rejected: {reject_reasons['saturation']})")
+    print(f"  After probe norm err filter: {n - reject_reasons['background'] - reject_reasons['saturation'] - reject_reasons['probe_norm']} (rejected: {reject_reasons['probe_norm']})")
+    print(f"  After ntot filter:           {n - reject_reasons['background'] - reject_reasons['saturation'] - reject_reasons['probe_norm'] - reject_reasons['ntot']} (rejected: {reject_reasons['ntot']})")
+    print()
+    print(f"FINAL RESULT: {np.count_nonzero(good)}/{n} shots remaining")
+    print(f"  ├─ Background contamination rejected:  {reject_reasons['background']}")
+    print(f"  ├─ Saturation rejected:                {reject_reasons['saturation']}")
+    print(f"  ├─ Probe normalization error rejected: {reject_reasons['probe_norm']}")
+    print(f"  └─ Low atom count (ntot) rejected:     {reject_reasons['ntot']}")
+    print(f"{'='*80}\n")
 
     return good
 
@@ -1310,10 +1345,12 @@ def plot_main_waterfall(
                     # Plot interpolated curve
                     ax_sig.plot(x_smooth, y_smooth, '-', color='blue', linewidth=2, alpha=0.7, label='Interpolation')
                     
-                    # Save interpolated profile to text file in waterfall script directory
+                    # Save interpolated profile to text file in waterfall_v2 directory
                     try:
                         script_dir = os.path.dirname(os.path.abspath(__file__))
-                        output_file = os.path.join(script_dir, 'sigmoid_center_interpolation.txt')
+                        # Save to waterfall_v2 folder
+                        waterfall_v2_dir = os.path.join(os.path.dirname(script_dir), 'waterfall_v2')
+                        output_file = os.path.join(waterfall_v2_dir, 'sigmoid_center_interpolation.txt')
                         
                         header = f"# Interpolated sigmoid center profile\n# x (um) vs {y_axis_label} (sigmoid center)\n# Interpolation type: {kind}\n"
                         data_to_save = np.column_stack((x_smooth, y_smooth))
@@ -1631,11 +1668,13 @@ def plot_main_waterfall(
         ax_corr.grid(True, alpha=0.3)
 
 
-def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_per_px, params=None):
+def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_per_px, params=None, mode_cfg=None):
     from scipy.optimize import curve_fit
 
     if params is None:
         params = {}
+    if mode_cfg is None:
+        mode_cfg = {}
     x_min_um = params.get('X_MIN_INTEGRATION', 900)
     x_max_um = params.get('X_MAX_INTEGRATION', 1200)
     
@@ -1699,6 +1738,19 @@ def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_pe
         
         # Filter sigmoid centers within the specified range
         mask = (np.array(sigmoid_centers_x) >= dw_x_min_m) & (np.array(sigmoid_centers_x) <= dw_x_max_m)
+        
+        # Also apply time filtering if provided in mode config
+        dw_fit_t_start = None
+        dw_fit_t_end = None
+        if isinstance(mode_cfg, dict):
+            dw_fit_t_start = mode_cfg.get('dw_fit_t_start', None)
+            dw_fit_t_end = mode_cfg.get('dw_fit_t_end', None)
+        
+        if dw_fit_t_start is not None and dw_fit_t_end is not None:
+            time_mask = (np.array(time_centers_y) >= dw_fit_t_start) & (np.array(time_centers_y) <= dw_fit_t_end)
+            mask = mask & time_mask
+            print(f"Domain wall time range filter: {dw_fit_t_start} - {dw_fit_t_end} ms")
+        
         filtered_x = np.array(sigmoid_centers_x)[mask]
         filtered_t = np.array(time_centers_y)[mask]
         
@@ -1728,6 +1780,16 @@ def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_pe
             print(f"  polyfit result: slope (dt/dx)={coeffs[0]}, intercept={coeffs[1]}")
             print(f"  Fit equation (x in meters): bubbles_time = {coeffs[0]:.6e} * x + {coeffs[1]:.6f}")
             print(f"  Fit equation (x in μm): bubbles_time = {coeffs[0]*1e-6:.6e} * x_um + {coeffs[1]:.6f}")
+            
+            # Track start and end points of domain wall speed fit
+            fit_x_start = float(filtered_x_clean.min() * 1e6)  # in micrometers
+            fit_x_end = float(filtered_x_clean.max() * 1e6)    # in micrometers
+            fit_t_start = float(filtered_t_clean[np.argmin(filtered_x_clean)])
+            fit_t_end = float(filtered_t_clean[np.argmax(filtered_x_clean)])
+            
+            print(f"Domain wall fit range:")
+            print(f"  x: {fit_x_start:.3f} - {fit_x_end:.3f} μm")
+            print(f"  t: {fit_t_start:.3f} - {fit_t_end:.3f} ms")
             
             velocity_slope = coeffs[0]  # dt/dx in ms/meter
             velocity_um_ms = 1e6 / velocity_slope if velocity_slope != 0 else float('inf')  # um/ms
@@ -2982,10 +3044,346 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             cbar_raw = fig_raw.colorbar(im_raw, cax=cax_raw)
             cbar_raw.set_label('magnetization m')
 
+    # bubbles_evolution: All shots waterfall with separators for different bubbles_time values
+    if scan == 'bubbles_evolution' and plot_flags.get('all_shots_waterfall', False) and len(M_full) > 0:
+        fig_raw, ax_raw = plt.subplots(figsize=(10.0, 6.5), constrained_layout=False)
+        try:
+            fig_raw.set_tight_layout(False)
+        except Exception:
+            pass
+        try:
+            fig_raw.set_constrained_layout(False)
+        except Exception:
+            pass
+        fig_raw.subplots_adjust(left=0.09, right=0.84, bottom=0.10, top=0.92)
+        cax_raw = fig_raw.add_axes([0.90, 0.10, 0.018, 0.82])
+        raw_vmin = -1.0 if params.get('WATERFALL_MAG_CLIM') is None else params['WATERFALL_MAG_CLIM'][0]
+        raw_vmax = 1.0 if params.get('WATERFALL_MAG_CLIM') is None else params['WATERFALL_MAG_CLIM'][1]
+        
+        x_centers_um_bub = np.arange(M_full.shape[1]) * um_per_px
+        x_min_um_bub = float(params['X_MIN_INTEGRATION'])
+        x_max_um_bub = float(params['X_MAX_INTEGRATION'])
+        
+        # Detect domain walls for each shot
+        gaussian_sigma_um = 3.0
+        deriv_threshold = 0.03
+        dw_left_x = []  # Left domain wall x positions for each shot
+        dw_right_x = []  # Right domain wall x positions for each shot
+        
+        for shot_idx in range(len(M_full)):
+            m_profile = np.asarray(M_full[shot_idx], dtype=float)
+            
+            # Smooth with Gaussian filter
+            if gaussian_sigma_um > 0:
+                gaussian_sigma_px = gaussian_sigma_um / um_per_px
+                m_smooth = gaussian_filter1d(m_profile, sigma=gaussian_sigma_px)
+            else:
+                m_smooth = m_profile
+            
+            # Compute derivative
+            m_deriv = np.gradient(m_smooth)
+            
+            # Find integration region indices
+            idx_min = int(np.argmin(np.abs(x_centers_um_bub - x_min_um_bub)))
+            idx_max = int(np.argmin(np.abs(x_centers_um_bub - x_max_um_bub)))
+            if idx_max < idx_min:
+                idx_min, idx_max = idx_max, idx_min
+            
+            # Find left wall: scan from left edge (x_min) rightward
+            left_wall_x = None
+            if idx_min < len(m_deriv):
+                for i in range(idx_min, min(idx_max, len(m_deriv))):
+                    if m_deriv[i] <= -deriv_threshold:  # Negative derivative = decreasing magnetization
+                        left_wall_x = float(x_centers_um_bub[i])
+                        break
+            
+            # Find right wall: scan from right edge (x_max) leftward
+            right_wall_x = None
+            if idx_max < len(m_deriv):
+                for i in range(idx_max, max(idx_min - 1, -1), -1):
+                    if m_deriv[i] >= deriv_threshold:  # Positive derivative = increasing magnetization
+                        right_wall_x = float(x_centers_um_bub[i])
+                        break
+            
+            dw_left_x.append(left_wall_x)
+            dw_right_x.append(right_wall_x)
+        
+        im_raw = ax_raw.imshow(
+            M_full,
+            aspect='auto',
+            cmap='RdBu',
+            interpolation='nearest',
+            resample=False,
+            vmin=raw_vmin,
+            vmax=raw_vmax,
+            extent=[float(x_centers_um_bub[0]), float(x_centers_um_bub[-1]), float(len(M_full)) + 0.5, 0.5],
+        )
+        ax_raw.set_xlabel(r'$\mu m$')
+        ax_raw.set_ylabel(f'shot index (ordered by {y_axis_col})')
+        ax_raw.set_title(f'Raw magnetization waterfall ordered by {y_axis_col} (seqs: {seqs})')
+        ax_raw.set_xlim(float(x_centers_um_bub[0]), float(x_centers_um_bub[-1]))
+        ax_raw.set_ylim(float(len(M_full)) + 0.5, 0.5)
+        ax_raw.set_autoscale_on(False)
+        ax_raw.axvline(x=float(x_min_um_bub), color='lime', linestyle='--', linewidth=2.2, alpha=0.95)
+        ax_raw.axvline(x=float(x_max_um_bub), color='lime', linestyle='--', linewidth=2.2, alpha=0.95)
+        
+        # Draw detected domain walls
+        for shot_idx in range(len(M_full)):
+            y_shot = float(shot_idx + 1)
+            if dw_left_x[shot_idx] is not None:
+                ax_raw.plot(dw_left_x[shot_idx], y_shot, 'o', color='green', markersize=4, alpha=0.8, zorder=15)
+            if dw_right_x[shot_idx] is not None:
+                ax_raw.plot(dw_right_x[shot_idx], y_shot, 's', color='violet', markersize=4, alpha=0.8, zorder=15)
+        
+        # Add separators between different bubbles_time values
+        if len(grouped_indices) > 0:
+            x_left = float(x_centers_um_bub[0])
+            x_right = float(x_centers_um_bub[-1])
+            x_text = x_left + 0.012 * (x_right - x_left)
+            
+            start = 0
+            centers = []
+            for time_val, g in zip(grouped_y, grouped_indices):
+                end = start + len(g)
+                y_start = float(start) + 0.5
+                y_end = float(end) + 0.5
+                y_center = 0.5 * (y_start + y_end)
+                centers.append(y_center)
+                
+                # Draw an empty horizontal separator between different time values
+                if start > 0:
+                    sep_half_height = 0.42
+                    ax_raw.axhspan(
+                        y_start - sep_half_height,
+                        y_start + sep_half_height,
+                        facecolor='white',
+                        edgecolor='none',
+                        zorder=19,
+                    )
+                
+                # Print time value inside the block
+                try:
+                    time_txt = f"{float(time_val):.6g}"
+                except Exception:
+                    time_txt = str(time_val)
+                
+                ax_raw.text(
+                    x_text,
+                    y_center,
+                    f'{y_axis_col}={time_txt}',
+                    color='white',
+                    fontsize=8,
+                    va='center',
+                    ha='left',
+                    bbox=dict(facecolor='black', alpha=0.35, edgecolor='none', pad=1.5),
+                    zorder=20,
+                )
+                start = end
+            
+            # Use a secondary y-axis for time value labels
+            ax_time_ticks = ax_raw.secondary_yaxis('right', functions=(lambda y: y, lambda y: y))
+            ax_time_ticks.set_yticks(centers)
+            try:
+                ax_time_ticks.set_yticklabels([f'{float(v):.6g}' for v in grouped_y], fontsize=8)
+            except Exception:
+                ax_time_ticks.set_yticklabels([str(v) for v in grouped_y], fontsize=8)
+            ax_time_ticks.set_ylabel(y_axis_col)
+            ax_time_ticks.grid(False)
+        
+        cbar_raw = fig_raw.colorbar(im_raw, cax=cax_raw)
+        cbar_raw.set_label('magnetization m')
+        
+        # Plot domain wall positions as a function of bubbles_time
+        fig_dw, ax_dw = plt.subplots(figsize=(10.0, 6.0), tight_layout=True)
+        
+        dw_times = []
+        dw_left_mean = []
+        dw_left_sem = []
+        dw_right_mean = []
+        dw_right_sem = []
+        dw_left_all = []  # All individual left wall measurements
+        dw_left_times_all = []  # Corresponding times for left measurements
+        dw_right_all = []  # All individual right wall measurements
+        dw_right_times_all = []  # Corresponding times for right measurements
+        
+        for time_val, idx_group in zip(grouped_y, grouped_indices):
+            dw_left_group = [dw_left_x[i] for i in idx_group if dw_left_x[i] is not None]
+            dw_right_group = [dw_right_x[i] for i in idx_group if dw_right_x[i] is not None]
+            
+            dw_times.append(float(time_val))
+            
+            # Store all individual measurements with their times
+            for dw_left_val in dw_left_group:
+                dw_left_all.append(dw_left_val)
+                dw_left_times_all.append(float(time_val))
+            
+            for dw_right_val in dw_right_group:
+                dw_right_all.append(dw_right_val)
+                dw_right_times_all.append(float(time_val))
+            
+            if len(dw_left_group) > 0:
+                dw_left_mean.append(float(np.mean(dw_left_group)))
+                if len(dw_left_group) > 1:
+                    dw_left_sem.append(float(np.std(dw_left_group, ddof=1) / np.sqrt(len(dw_left_group))))
+                else:
+                    dw_left_sem.append(0.0)
+            else:
+                dw_left_mean.append(np.nan)
+                dw_left_sem.append(np.nan)
+            
+            if len(dw_right_group) > 0:
+                dw_right_mean.append(float(np.mean(dw_right_group)))
+                if len(dw_right_group) > 1:
+                    dw_right_sem.append(float(np.std(dw_right_group, ddof=1) / np.sqrt(len(dw_right_group))))
+                else:
+                    dw_right_sem.append(0.0)
+            else:
+                dw_right_mean.append(np.nan)
+                dw_right_sem.append(np.nan)
+        
+        dw_times = np.asarray(dw_times, dtype=float)
+        dw_left_mean = np.asarray(dw_left_mean, dtype=float)
+        dw_left_sem = np.asarray(dw_left_sem, dtype=float)
+        dw_right_mean = np.asarray(dw_right_mean, dtype=float)
+        dw_right_sem = np.asarray(dw_right_sem, dtype=float)
+        dw_left_all = np.asarray(dw_left_all, dtype=float)
+        dw_left_times_all = np.asarray(dw_left_times_all, dtype=float)
+        dw_right_all = np.asarray(dw_right_all, dtype=float)
+        dw_right_times_all = np.asarray(dw_right_times_all, dtype=float)
+        
+        # Plot individual left domain wall points
+        if len(dw_left_all) > 0:
+            ax_dw.scatter(
+                dw_left_times_all,
+                dw_left_all,
+                color='green',
+                s=20,
+                alpha=0.4,
+                label='Left wall (single shots)',
+                zorder=5,
+            )
+        
+        # Plot individual right domain wall points
+        if len(dw_right_all) > 0:
+            ax_dw.scatter(
+                dw_right_times_all,
+                dw_right_all,
+                color='violet',
+                s=20,
+                alpha=0.4,
+                label='Right wall (single shots)',
+                zorder=5,
+            )
+        
+        # Plot left domain wall
+        valid_left = np.isfinite(dw_left_mean)
+        left_fit_text = None
+        if np.any(valid_left):
+            ax_dw.errorbar(
+                dw_times[valid_left],
+                dw_left_mean[valid_left],
+                yerr=dw_left_sem[valid_left],
+                fmt='o-',
+                color='green',
+                ecolor='green',
+                elinewidth=1.2,
+                capsize=5,
+                markersize=6,
+                linewidth=1.5,
+                label='Left domain wall mean ± SEM',
+                alpha=0.8,
+                zorder=10,
+            )
+            
+            # Linear fit for left wall
+            x_left_fit = dw_times[valid_left]
+            y_left_fit = dw_left_mean[valid_left]
+            
+            # Apply time range filtering if provided in mode_cfg
+            dw_fit_t_start = mode_cfg.get('dw_fit_t_start', None) if mode_cfg else None
+            dw_fit_t_end = mode_cfg.get('dw_fit_t_end', None) if mode_cfg else None
+            
+            if dw_fit_t_start is not None and dw_fit_t_end is not None:
+                time_mask = (x_left_fit >= dw_fit_t_start) & (x_left_fit <= dw_fit_t_end)
+                x_left_fit = x_left_fit[time_mask]
+                y_left_fit = y_left_fit[time_mask]
+            
+            if len(x_left_fit) >= 2:
+                left_coeffs = np.polyfit(x_left_fit, y_left_fit, 1)
+                left_speed = left_coeffs[0]  # slope in um/time_unit
+                x_left_line = np.array([x_left_fit.min(), x_left_fit.max()])
+                y_left_line = np.polyval(left_coeffs, x_left_line)
+                ax_dw.plot(x_left_line, y_left_line, 'g--', linewidth=1.5, alpha=0.6, zorder=8)
+                left_fit_text = f'Left wall speed: {left_speed:.4f} μm/time'
+        
+        # Plot right domain wall
+        valid_right = np.isfinite(dw_right_mean)
+        right_fit_text = None
+        if np.any(valid_right):
+            ax_dw.errorbar(
+                dw_times[valid_right],
+                dw_right_mean[valid_right],
+                yerr=dw_right_sem[valid_right],
+                fmt='s-',
+                color='violet',
+                ecolor='violet',
+                elinewidth=1.2,
+                capsize=5,
+                markersize=6,
+                linewidth=1.5,
+                label='Right domain wall mean ± SEM',
+                alpha=0.8,
+                zorder=10,
+            )
+            
+            # Linear fit for right wall
+            x_right_fit = dw_times[valid_right]
+            y_right_fit = dw_right_mean[valid_right]
+            
+            # Apply time range filtering if provided in mode_cfg
+            dw_fit_t_start = mode_cfg.get('dw_fit_t_start', None) if mode_cfg else None
+            dw_fit_t_end = mode_cfg.get('dw_fit_t_end', None) if mode_cfg else None
+            
+            if dw_fit_t_start is not None and dw_fit_t_end is not None:
+                time_mask = (x_right_fit >= dw_fit_t_start) & (x_right_fit <= dw_fit_t_end)
+                x_right_fit = x_right_fit[time_mask]
+                y_right_fit = y_right_fit[time_mask]
+            
+            if len(x_right_fit) >= 2:
+                right_coeffs = np.polyfit(x_right_fit, y_right_fit, 1)
+                right_speed = right_coeffs[0]  # slope in um/time_unit
+                x_right_line = np.array([x_right_fit.min(), x_right_fit.max()])
+                y_right_line = np.polyval(right_coeffs, x_right_line)
+                ax_dw.plot(x_right_line, y_right_line, 'v--', linewidth=1.5, alpha=0.6, zorder=8, color='violet')
+                right_fit_text = f'Right wall speed: {right_speed:.4f} μm/time'
+        
+        ax_dw.set_xlabel(y_axis_col, fontsize=12)
+        ax_dw.set_ylabel(r'Position ($\mu m$)', fontsize=12)
+        ax_dw.set_title(f'Domain wall positions vs {y_axis_col} (seqs: {seqs})', fontsize=13)
+        ax_dw.grid(True, alpha=0.3)
+        ax_dw.legend(loc='lower right', fontsize=10)
+        
+        # Add text box with expansion speeds
+        if left_fit_text is not None or right_fit_text is not None:
+            textstr = ''
+            if left_fit_text is not None:
+                textstr += left_fit_text + '\n'
+            if right_fit_text is not None:
+                textstr += right_fit_text
+            
+            ax_dw.text(
+                0.05, 0.95, textstr,
+                transform=ax_dw.transAxes,
+                fontsize=11,
+                verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+                family='monospace',
+            )
+
     # Get domain wall fit data before creating main plot
     dw_fit_coeffs, dw_fit_x, dw_fit_t = None, None, None
     if plot_flags.get('evolution_plots', False) and scan == 'bubbles_evolution':
-        dw_fit_coeffs, dw_fit_x, dw_fit_t = plot_evolution_analysis(y_final, y_axis_col, z_fluc_final, M_final, um_per_px, params)
+        dw_fit_coeffs, dw_fit_x, dw_fit_t = plot_evolution_analysis(y_final, y_axis_col, z_fluc_final, M_final, um_per_px, params, mode_cfg)
 
     if plot_flags.get('main_waterfall', True):
         title_full = f"{title_base}\n{'AVERAGED' if average else 'UNIQUE'}\n(seqs: {seqs})"

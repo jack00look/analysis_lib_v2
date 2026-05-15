@@ -121,6 +121,19 @@ def get_day_data(hdf_config, hdf_root=None):
     else:
         result_df = pd.concat(dfs, sort=False)
     
+    # If loading today's data, also include live Lyse data (which has sequence_index)
+    if hdf_config.get('today', True):
+        try:
+            import lyse
+            logger.info("Adding live Lyse data to include shots not yet saved to HDF...")
+            lyse_df = lyse.data()
+            if lyse_df is not None and len(lyse_df) > 0:
+                logger.info(f"  → Live Lyse data: {len(lyse_df)} shots")
+                result_df = pd.concat([result_df, lyse_df], sort=False)
+                logger.info(f"  → Combined: {len(result_df)} shots (before dedup)")
+        except Exception as e:
+            logger.warning(f"Could not load live Lyse data: {e}")
+    
     # Remove duplicates (same shot analyzed twice)
     try:
         n_before = len(result_df)

@@ -1,0 +1,42 @@
+# Camera Settings Configuration for KZ Article
+# These settings apply to all datasets in the article
+
+camera_settings:
+  # Magnetization extraction modality
+  magnetization_modality: "vert1_two_component"
+  
+  # Camera name
+  camera_name: "cam_vert1"
+  
+  # Atom images for m1 and m2
+  atoms_images:
+    - "PTAI_m1"
+    - "PTAI_m2"
+  
+  # Data origin (show_ODs or show_ODs_v2)
+  data_origin: "show_ODs_v2"
+  
+  # Type of analysis
+  type: "two_component"
+  
+  # Apply n_tot check (always true for this article)
+  apply_ntot_check: true
+
+# Modality-specific settings
+modality_config:
+  vert1_two_component:
+    camera_name: "cam_vert1"
+    type: "two_component"
+    data_origin: "show_ODs_v2"
+    atoms_images: ["PTAI_m1", "PTAI_m2"]
+    apply_ntot_check: true
+    # Optional affine correction (will be overridden by dataset-specific values)
+    affine_correction:
+      a1: 1.0
+      b1: 0.0
+      c1: 0.0
+      a2: 1.0
+      b2: 0.0
+      c2: 0.0
+    m1_column: null  # Auto-detect
+    m2_column: null  # Auto-detect

@@ -1,0 +1,64 @@
+# KZ Article Analysis Configuration
+# Main config file listing all datasets to analyze
+
+article_name: "KZ_det_scan"
+article_description: "KZ detuning scan analysis"
+
+# Shared parameters
+shared_params:
+  # Shared numeric parameters
+  SIGMA_Z_LOCAL_AVG: 1.0
+  SIGMA_Z_LOCAL_FLUCT: 1.0
+  NUM_SECTIONS: 300
+  # Waterfall magnitude colorbar limits (set to None for autoscale)
+  WATERFALL_MAG_CLIM: [-1.0, 1.0]
+  WATERFALL_DENSITY_CLIM: null
+  # Shot filtering thresholds (applied from multishot_lib)
+  SHOT_FILTER_CONFIG:
+    enabled: true
+    apply_back_check: true
+    apply_sat_check: true
+    apply_probe_norm_err_check: true
+    back_threshold: 0.001
+    sat_threshold: 1.0
+    probe_norm_err_threshold: 0.1
+    ntot_threshold: 7.0e5  # Common n_tot threshold for all datasets
+
+# Datasets to analyze
+datasets:
+  - dataset_id: "dataset_001"
+    description: "First KZ scan - moderate detuning"
+    date:
+      year: 2026
+      month: 3
+      day: 24
+    sequences: [33,34,35,36,37,38]
+    # These parameters will be tuned interactively
+    affine_correction:
+      a1: 1.0
+      b1: 0.0
+      c1: 0.0
+      a2: 1.0
+      b2: 0.0
+      c2: 0.0
+    x_min_integration: 900  # micrometers
+    x_max_integration: 1200  # micrometers
+    domain_balance_fit_window: [910, 1150]  # x range for domain wall fit (um)
+
+  - dataset_id: "dataset_002"
+    description: "Second KZ scan - high detuning"
+    date:
+      year: 2026
+      month: 3
+      day: 24
+    sequences: [43,44,45,46,47]
+    affine_correction:
+      a1: 1.0
+      b1: 0.0
+      c1: 0.0
+      a2: 1.0
+      b2: 0.0
+      c2: 0.0
+    x_min_integration: 900
+    x_max_integration: 1200
+    domain_balance_fit_window: [910, 1150]

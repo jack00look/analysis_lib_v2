@@ -68,6 +68,7 @@ class ProcessedImageMetadata:
     cnt_rel_atoms_back: float
     cnt_rel_probe_sat: float
     cnt_rel_atoms_sat: float
+    N_atoms: float  # Total atom number computed from full n_2D
 
 
 @dataclass
@@ -204,6 +205,13 @@ def calculate_OD(atoms, probe, cam, back=None, roi_background=None, alpha=None,
         OD_lin = (probe - atoms) / (chi_sat * pulse_time)
         n_2D = (OD_log + OD_lin) / ATOMIC_CROSS_SECTION_SIGMA
         
+        # Clip negative values to zero (noise from background subtraction)
+        n_2D = np.maximum(n_2D, 0)
+        
+        # Compute total atom number from full n_2D (not cut by roi_integration)
+        pixel_size = cam['px_size']
+        N_atoms = float(np.sum(n_2D) * pixel_size ** 2)
+        
         metadata = ProcessedImageMetadata(
             OD_log_bare_sum=float(np.sum(OD_log_bare)),
             OD_lin_sum=float(np.sum(OD_lin)),
@@ -213,6 +221,7 @@ def calculate_OD(atoms, probe, cam, back=None, roi_background=None, alpha=None,
             cnt_rel_atoms_back=float(cnt_atoms_back),
             cnt_rel_probe_sat=float(cnt_probe_sat),
             cnt_rel_atoms_sat=float(cnt_atoms_sat),
+            N_atoms=N_atoms,
         )
         
         return n_2D, metadata, OD_log_bare
@@ -221,6 +230,13 @@ def calculate_OD(atoms, probe, cam, back=None, roi_background=None, alpha=None,
         logger.info('Calculating phase contrast OD')
         OD_log_bare = np.array(atoms).clip(1) / np.array(probe).clip(1)
         n_2D = OD_log_bare
+        
+        # Clip negative values to zero (noise from background subtraction)
+        n_2D = np.maximum(n_2D, 0)
+        
+        # Compute total atom number from full n_2D (not cut by roi_integration)
+        pixel_size = cam['px_size']
+        N_atoms = float(np.sum(n_2D) * pixel_size ** 2)
         
         metadata = ProcessedImageMetadata(
             OD_log_bare_sum=0.0,
@@ -231,6 +247,7 @@ def calculate_OD(atoms, probe, cam, back=None, roi_background=None, alpha=None,
             cnt_rel_atoms_back=float(cnt_atoms_back),
             cnt_rel_probe_sat=float(cnt_probe_sat),
             cnt_rel_atoms_sat=float(cnt_atoms_sat),
+            N_atoms=N_atoms,
         )
         
         return n_2D, metadata, OD_log_bare

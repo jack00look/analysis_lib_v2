@@ -28,7 +28,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Import multishot_lib
-from multishot_lib import get_and_filter_shots
+from multishot_lib import get_and_filter_shots, get_day_data
 
 # Import main config
 from waterfall_v2.waterfall_config import ACTIVE_MODE, SEQS, HDF_CONFIG
@@ -41,8 +41,9 @@ import importlib
 mode_config_module = importlib.import_module(f'waterfall_v2.mode_configs.{ACTIVE_MODE}')
 MODE_CONFIG = mode_config_module.MODE_CONFIG
 
-# Import plotting library
-from waterfall_v2.waterfall_lib import waterfall_plot
+# Import plotting library - USE THE ORIGINAL waterfall/waterfall_lib.py
+sys.path.insert(0, '/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/waterfall')
+from waterfall_lib import waterfall_plot
 from waterfall_v2.common_config import PARAMS
 
 
@@ -73,20 +74,19 @@ def main():
     else:
         logger.info("Sequences: All available")
     
-    # Load and filter shots using multishot_lib
+    # Load shots using get_day_data (same as waterfall_FLAT_v4)
+    # This loads raw data without quality filtering, for comparison with waterfall_FLAT_v4
     logger.info(f"\n{'='*80}")
-    logger.info("LOADING AND FILTERING SHOTS")
+    logger.info("LOADING SHOTS (RAW DATA - NO QUALITY FILTERING)")
     logger.info(f"{'='*80}\n")
     
-    df = get_and_filter_shots(
-        hdf_config=HDF_CONFIG,
-        camera_name=camera_name,
-        seqs=seqs_to_load
-    )
+    df = get_day_data(HDF_CONFIG)
     
-    if df.empty:
-        logger.error("\nNo shots passed filtering. Exiting.")
+    if df is None or df.empty:
+        logger.error("\nNo shots loaded. Exiting.")
         return
+    
+    logger.info(f"\n✓ Loaded {len(df)} total shots from HDF files")
     
     logger.info(f"\n{'='*80}")
     logger.info("SHOTS LOADED SUCCESSFULLY")
@@ -94,12 +94,20 @@ def main():
     
     # Show summary
     logger.info(f"Shape of DataFrame: {df.shape}")
-    logger.info(f"Columns: {list(df.columns)[:10]}... (showing first 10)")
     
     # Display shot information if available
-    if 'shot_name' in df.columns:
-        logger.info(f"\nShot names:")
-        for shot_name in df['shot_name'].head(10).values:
+    shot_name_col = None
+    for col in df.columns:
+        if isinstance(col, tuple) and col[1] == 'shot_name':
+            shot_name_col = col
+            break
+        elif col == 'shot_name':
+            shot_name_col = col
+            break
+    
+    if shot_name_col:
+        logger.info(f"\nShot names (first 10):")
+        for shot_name in df[shot_name_col].head(10).values:
             logger.info(f"  - {shot_name}")
         if len(df) > 10:
             logger.info(f"  ... and {len(df) - 10} more")

@@ -1,14 +1,14 @@
 import numpy as np
 
 # Set this to pick what to run in waterfall_FLAT_v4.py
-ACTIVE_MODE = 'bubbles_evolution'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
+ACTIVE_MODE = 'ARP_Backward'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
 # Optional override for sequence indices used by ACTIVE_MODE (set to None to use mode default)
 
 # If True, use recommended_center from the latest
 # results/kz_param_stability_safe_box_*.json.
 RECOMMENDED_CENTER = False
-
-SEQS = [45]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
+#SEQS = [28]
+SEQS = [13,14]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
 #EQS = [41]
 # -------------------------
 # HDF Data Configuration
@@ -16,8 +16,8 @@ SEQS = [45]  # <-- Set your sequence indices here, or set to None to use default
 HDF_CONFIG = {
     'today': True,  # Set to False to load HDF from a previous day
     'year': 2026,   # Set if today=False (e.g., 2026)
-    'month': 4,  # Set if today=False (e.g., 3 for March)
-    'day': 15,    # Set if today=False (e.g., 17)
+    'month': 5,  # Set if today=False (e.g., 3 for March)
+    'day': 7,    # Set if today=False (e.g., 17)
 }
 
 # -------------------------
@@ -31,7 +31,7 @@ PARAMS = {
     'X_MAX_INTEGRATION': 1200,
     'NUM_SECTIONS': 300,
     # Set to None for autoscale
-    'WATERFALL_MAG_CLIM': (-.1, 1.),
+    'WATERFALL_MAG_CLIM': (-1., 1.),
     'WATERFALL_DENSITY_CLIM': None,
     # Domain wall velocity analysis (bubbles_evolution mode)
     # Set X range for linear plot of sigmoid center time vs position
@@ -55,7 +55,7 @@ SHOT_FILTER_CONFIG = {
     'sat_threshold': 1.,
     'probe_norm_err_threshold': 0.1,
     # Used only when modality enables Ntot filtering
-    'ntot_threshold': 7e5,
+    'ntot_threshold': 2e6,
 }
 
 # -------------------------
@@ -131,13 +131,14 @@ DEFECT_ANALYSIS_PARAMS = {
 DEFAULT_PLOTS = {
     'main_waterfall': True,
     'fluctuations_waterfall': True,
-    'sectioned_sigmoid': True,
+    'sectioned_sigmoid': False,
     'avg_density_profile': False,
     'avg_magnetization_profile': False,
     'corr_sigmoid_density': False,
     'corr_mag_density': False,
     'evolution_plots': False,
     'used_region_density_fluctuations': False,
+    'all_shots_waterfall': True,  # Shows all individual shots with separator lines when scan variable changes
 }
 
 
@@ -145,7 +146,7 @@ MODE_CONFIGS = {
     'ARP_Forward': {
         'scan': 'ARP_Forward',
         'seqs': [18,19, 20, 22],
-        'data_origin': 'show_ODs',
+        'data_origin': 'show_ODs_v2',
         'magnetization_modality': 'vert1_two_component',
         'constraints': None,
         'average': True,
@@ -174,7 +175,7 @@ MODE_CONFIGS = {
     'ARP_Backward': {
         'scan': 'ARP_Backward',
         'seqs': [48],
-        'data_origin': 'show_ODs',
+        'data_origin': 'show_ODs_v2',
         'magnetization_modality': 'vert1_two_component',
         'constraints': None,
         'average': True,
@@ -276,7 +277,7 @@ MODE_CONFIGS = {
     'bubbles_evolution': {
         'scan': 'bubbles_evolution',
         'seqs': [1],
-        'data_origin': 'show_ODs',
+        'data_origin': 'show_ODs_v2',
         'magnetization_modality': 'vert1_two_component',
         'constraints': None,
         'average': True,
@@ -285,8 +286,10 @@ MODE_CONFIGS = {
             'sectioned_sigmoid': False,
             'corr_sigmoid_density': False,
             'evolution_plots': True,
+            'all_shots_waterfall': True,  # Show all individual shots with separator lines for each bubbles_time
         },
         'globals_in_title': [],
+        'scan_variable_override': 'bubbles_time',  # Column name for the x-axis variable in evolution plots
     },
     'bubbles_repeat': {
         'scan': 'bubbles_repeat',
@@ -331,5 +334,3 @@ MODE_CONFIGS = {
         ],
     },
 }
-
-
