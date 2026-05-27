@@ -141,8 +141,9 @@ class KZArticleAnalyzer:
         # This will use filtering thresholds from multishot_lib config
         try:
             df_filtered = get_and_filter_shots(hdf_config, camera_name, seqs=seqs)
+            logger.info(f"Successfully loaded shots using get_and_filter_shots")
         except Exception as e:
-            logger.error(f"Error loading data: {e}")
+            logger.error(f"Error loading data: {e}", exc_info=True)
             logger.error(f"Could not load or filter data for {date_cfg}")
             return None, None
         
@@ -151,6 +152,8 @@ class KZArticleAnalyzer:
             return None, None
         
         logger.info(f"Loaded {len(df_filtered)} shots after quality filtering")
+        logger.info(f"Filtered DataFrame shape: {df_filtered.shape}")
+        logger.info(f"Filtered DataFrame columns (first 10): {df_filtered.columns[:10].tolist()}")
         
         if len(df_filtered) < 5:
             logger.warning(f"Only {len(df_filtered)} shots after filtering, using all")
@@ -179,6 +182,14 @@ class KZArticleAnalyzer:
             shot = df_filtered.iloc[idx]
             m1_data = np.array(shot[m1_col])
             m2_data = np.array(shot[m2_col])
+            
+            # Debug: Check data shapes
+            if i == 0:
+                logger.info(f"m1_data type: {type(shot[m1_col])}, shape: {m1_data.shape}, dtype: {m1_data.dtype}")
+                logger.info(f"m2_data type: {type(shot[m2_col])}, shape: {m2_data.shape}, dtype: {m2_data.dtype}")
+                logger.info(f"m1_data value: {m1_data}")
+                logger.info(f"m2_data value: {m2_data}")
+            
             x_pixels = np.arange(len(m1_data))
             
             # Plot m1
@@ -306,45 +317,34 @@ class KZArticleAnalyzer:
         print(f"\nDataset will use sequences: {seqs}")
         print("\n" + "="*80)
         
-        while True:
-            response = input("Would you like to run preprocessing now? [y/n]: ").strip().lower()
-            if response in ['y', 'n']:
-                if response == 'y':
-                    # Import and run preprocessing
-                    try:
-                        sys.path.insert(0, '/home/rick/labscript-suite/userlib/analysislib/analysislib_v2')
-                        from run_show_ODs_batch import run_analysis
-                        
-                        print("\n" + "="*80)
-                        print("RUNNING PREPROCESSING")
-                        print("="*80)
-                        success = run_analysis(
-                            year=date_cfg['year'],
-                            month=date_cfg['month'],
-                            day=date_cfg['day'],
-                            sequences=seqs,
-                            verbose=True
-                        )
-                        
-                        if success:
-                            print("\n✓ Preprocessing complete! Continuing analysis...")
-                            break
-                        else:
-                            print("\n✗ Preprocessing failed. Please check your data and try again.")
-                            sys.exit(1)
-                    except Exception as e:
-                        print(f"\n✗ Error running preprocessing: {e}")
-                        print("You may need to run it manually:")
-                        print(f"  cd /home/rick/labscript-suite/userlib/analysislib/analysislib_v2")
-                        print(f"  python run_show_ODs_batch.py")
-                        sys.exit(1)
-                else:
-                    # User says they'll do it manually
-                    print("\nPlease run show_ODs_batch.py first, then restart this script.")
-                    print(f"  cd /home/rick/labscript-suite/userlib/analysislib/analysislib_v2")
-                    print(f"  python run_show_ODs_batch.py")
-                    sys.exit(0)
-                break
+        # Auto-run preprocessing (don't prompt for input)
+        try:
+            # Import and run preprocessing
+            sys.path.insert(0, '/home/rick/labscript-suite/userlib/analysislib/analysislib_v2')
+            from run_show_ODs_batch import run_analysis
+            
+            print("\n" + "="*80)
+            print("RUNNING PREPROCESSING")
+            print("="*80)
+            success = run_analysis(
+                year=date_cfg['year'],
+                month=date_cfg['month'],
+                day=date_cfg['day'],
+                sequences=seqs,
+                verbose=True
+            )
+            
+            if success:
+                print("\n✓ Preprocessing complete! Continuing analysis...")
+            else:
+                print("\n✗ Preprocessing failed. Please check your data and try again.")
+                sys.exit(1)
+        except Exception as e:
+            print(f"\n✗ Error running preprocessing: {e}")
+            print("You may need to run it manually:")
+            print(f"  cd /home/rick/labscript-suite/userlib/analysislib/analysislib_v2")
+            print(f"  python run_show_ODs_batch.py")
+            sys.exit(1)
     
     def run_analysis(self):
         """Run analysis on all datasets"""

@@ -13,8 +13,9 @@ Complete streamlined feedback workflow with profile accumulation:
 9. Load profile to the DMD server (default, can skip with --no-server)
 
 Workflow features:
-- Persistent profile list accumulates sigmoids across multiple runs
-- Each sigmoid has independent kp and smoothing_sigma
+- Persistent profile list accumulates profile pairs (sigmoid + density) across multiple runs
+- Each profile pair has independent kp and smoothing_sigma for sigmoid and density
+- Backward compatible: works with sigmoid-only if density profile is missing
 - Can manually edit feedback_sigmoids_list.py to adjust/add/remove profiles
 - Automatic visualization and DMD loading
 - Can delete last correction with --delete-last and reload without it
@@ -24,8 +25,10 @@ Usage:
     python auto_feedback_update.py [OPTIONS]
 
 Options:
-    --kp KP_VALUE              Override KP gain for new profile
-    --sigma SIGMA_VALUE        Override smoothing sigma for new profile
+    --kp KP_VALUE              Override KP gain for sigmoid profile
+    --sigma SIGMA_VALUE        Override smoothing sigma for sigmoid profile
+    --kp-d KP_DENSITY          Override KP gain for density profile
+    --sigma-d SIGMA_DENSITY    Override smoothing sigma for density profile
     --x-center X_CENTER        Override X_CENTER (center position of feedback region in µm)
     --feedback-width WIDTH     Override FEEDBACK_WIDTH (half-width of feedback region in µm)
     --soft-wall-width WIDTH    Override SOFT_WALL_WIDTH (width of soft wall transition in µm)
@@ -35,8 +38,8 @@ Options:
     --delete-last              Delete last correction and reload without it (WARNING: deletes file)
 
 Examples:
-    python auto_feedback_update.py                                              # Full workflow with DMD update
-    python auto_feedback_update.py --kp 1.5 --sigma 5.0                        # Override feedback parameters
+    python auto_feedback_update.py                                              # Full workflow with defaults
+    python auto_feedback_update.py --kp 1.5 --sigma 5.0 --kp-d 0.5 --sigma-d 3.0  # Override both profiles
     python auto_feedback_update.py --feedback-width 200 --soft-wall-width 100   # Adjust wall positions
     python auto_feedback_update.py --x-center 1000 --feedback-width 150         # Custom feedback region
     python auto_feedback_update.py --no-server                                  # Just save, don't load to DMD
@@ -313,8 +316,8 @@ def load_sigmoid_list(dmd_folder):
         return []
 
 
-def add_sigmoid_to_list(dmd_folder, new_filename, kp, sigma):
-    """Add new sigmoid to the feedback_sigmoids_list.py file."""
+def add_sigmoid_to_list(dmd_folder, sigmoid_filename, density_filename, kp_sigmoid, sigma_sigmoid, kp_density, sigma_density):
+    """Add new sigmoid and density profiles to the feedback_sigmoids_list.py file."""
     try:
         list_file_path = os.path.join(dmd_folder, 'feedback_sigmoids_list.py')
         
@@ -325,11 +328,14 @@ def add_sigmoid_to_list(dmd_folder, new_filename, kp, sigma):
         # Find SIGMOID_PROFILES list and add new entry
         import re
         
-        # Create new entry
+        # Create new entry with both sigmoid and density profiles
         new_entry = f"""    {{
-        'filename': '{new_filename}',
-        'kp': {kp},
-        'smoothing_sigma': {sigma},
+        'sigmoid_filename': '{sigmoid_filename}',
+        'density_filename': '{density_filename}',
+        'kp_sigmoid': {kp_sigmoid},
+        'smoothing_sigma_sigmoid': {sigma_sigmoid},
+        'kp_density': {kp_density},
+        'smoothing_sigma_density': {sigma_density},
         'description': 'Auto-added from waterfall',
     }},"""
         
@@ -348,14 +354,16 @@ def add_sigmoid_to_list(dmd_folder, new_filename, kp, sigma):
         if new_content != content:
             with open(list_file_path, 'w') as f:
                 f.write(new_content)
-            log(f"Added new sigmoid to list: {new_filename} (kp={kp}, sigma={sigma})")
+            log(f"Added new profile pair to list:")
+            log(f"  Sigmoid: {sigmoid_filename} (kp={kp_sigmoid}, sigma={sigma_sigmoid})")
+            log(f"  Density: {density_filename} (kp={kp_density}, sigma={sigma_density})")
             return True
         else:
             log("Warning: Could not update sigmoid list")
             return False
     
     except Exception as e:
-        log(f"Error adding sigmoid to list: {e}")
+        log(f"Error adding profiles to list: {e}")
         return False
     """Find the next available profile number."""
     max_num = -1
@@ -406,6 +414,33 @@ def save_sigmoid_update(profile_data, dmd_folder, profile_number, new_sigmoid_pa
     
     log(f"Saved profile to: {output_path}")
     return output_path
+
+
+def save_density_update(profile_data, sigmoid_folder, profile_number, new_density_path):
+    """Save the updated density profile with proper naming (for backward compatibility)."""
+    try:
+        x_dmd = profile_data['x']
+        profile_y = profile_data['y']
+        
+        output_filename = f'density_error_profile_update_{profile_number}.txt'
+        output_path = os.path.join(sigmoid_folder, output_filename)
+        
+        # Create header with information about the update
+        header = (f"# Updated density error profile\n"
+                  f"# Updated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                  f"# Source density: {os.path.basename(new_density_path)}\n"
+                  f"# Profile number: {profile_number}\n"
+                  f"# x (um) vs density error (a.u.)")
+        
+        data_to_save = np.column_stack((x_dmd, profile_y))
+        np.savetxt(output_path, data_to_save, header=header, fmt='%.6f', 
+                   delimiter='\t', comments='')
+        
+        log(f"Saved density profile to: {output_path}")
+        return output_path
+    except Exception as e:
+        log(f"Warning: Could not save density profile: {e}")
+        return None
 
 
 def update_plot_config(dmd_folder, profile_number, new_profile_label):
@@ -859,8 +894,10 @@ def main():
     
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='Automated DMD feedback update with accumulation')
-    parser.add_argument('--kp', type=float, help='Override KP gain for new profile')
-    parser.add_argument('--sigma', type=float, help='Override smoothing sigma for new profile')
+    parser.add_argument('--kp', type=float, help='Override KP gain for sigmoid profile')
+    parser.add_argument('--sigma', type=float, help='Override smoothing sigma for sigmoid profile')
+    parser.add_argument('--kp-d', type=float, help='Override KP gain for density profile')
+    parser.add_argument('--sigma-d', type=float, help='Override smoothing sigma for density profile')
     parser.add_argument('--no-server', action='store_true', help='Do not load to DMD server')
     parser.add_argument('--no-plot-update', action='store_true', help='Do not update plot config')
     parser.add_argument('--reset', action='store_true', help='Reset all profiles and clear list')
@@ -890,7 +927,14 @@ def main():
     
     # Get effective parameters for NEW sigmoid
     kp = args.kp if args.kp is not None else config.NEW_PROFILE_KP
-    sigma = args.sigma if args.sigma is not None else config.DEFAULT_SMOOTHING_SIGMA
+    # Get effective parameters for NEW sigmoid profile
+    kp = args.kp if args.kp is not None else config.NEW_PROFILE_KP_SIGMOID
+    sigma = args.sigma if args.sigma is not None else config.NEW_PROFILE_SMOOTHING_SIGMA_SIGMOID
+    
+    # Get effective parameters for NEW density profile
+    kp_d = args.kp_d if args.kp_d is not None else config.NEW_PROFILE_KP_DENSITY
+    sigma_d = args.sigma_d if args.sigma_d is not None else config.NEW_PROFILE_SMOOTHING_SIGMA_DENSITY
+    
     auto_update_plot = config.AUTO_UPDATE_PLOT_CONFIG and not args.no_plot_update
     load_to_server = not args.no_server
     
@@ -899,7 +943,8 @@ def main():
     feedback_width = args.feedback_width if args.feedback_width is not None else config.FEEDBACK_WIDTH
     soft_wall_width = args.soft_wall_width if args.soft_wall_width is not None else config.SOFT_WALL_WIDTH
     
-    log(f"New profile - kp={kp}, sigma={sigma}")
+    log(f"Sigmoid profile - kp={kp}, sigma={sigma}")
+    log(f"Density profile - kp_d={kp_d}, sigma_d={sigma_d}")
     log(f"Wall config - x_center={x_center}, feedback_width={feedback_width}, soft_wall_width={soft_wall_width}")
     log(f"Auto-update plot: {auto_update_plot}")
     log(f"Load to DMD server: {load_to_server}")
@@ -964,12 +1009,27 @@ def main():
         log("ERROR: Could not load new sigmoid profile. Exiting.")
         return False
     
-    # =========================================================================
-    # 3) Save new sigmoid to magnetization_feedback folder with ORIGINAL values
-    # =========================================================================
-    log("\n--- Step 3: Saving new sigmoid and updating profile list ---")
+    # Try to load density profile (backward compatible - optional)
+    density_path = sigmoid_path.replace('sigmoid_center_interpolation.txt', 'density_error_profile.txt')
+    x_density, density_values = None, None
+    has_density = False
     
-    # Find next sigmoid_update number
+    if os.path.exists(density_path):
+        x_density, density_values = load_error_profile_from_txt(density_path)
+        if x_density is not None:
+            has_density = True
+            log(f"Also loaded density error profile: {os.path.basename(density_path)}")
+        else:
+            log(f"Warning: Could not load density profile at {density_path}, continuing with sigmoid only")
+    else:
+        log(f"Note: No density profile found at {density_path}, using sigmoid only", level=2)
+    
+    # =========================================================================
+    # 3) Save new sigmoid and density to magnetization_feedback folder
+    # =========================================================================
+    log("\n--- Step 3: Saving new profiles and updating profile list ---")
+    
+    # Find next profile update number
     max_num = -1
     for filename in os.listdir(sigmoid_folder):
         if filename.startswith('sigmoid_center_interpolation_update_') and filename.endswith('.txt'):
@@ -979,8 +1039,9 @@ def main():
             except ValueError:
                 pass
     
-    new_sigmoid_num = max_num + 1
-    new_sigmoid_filename = f'sigmoid_center_interpolation_update_{new_sigmoid_num}.txt'
+    new_profile_num = max_num + 1
+    new_sigmoid_filename = f'sigmoid_center_interpolation_update_{new_profile_num}.txt'
+    new_density_filename = f'density_error_profile_update_{new_profile_num}.txt' if has_density else None
     new_sigmoid_path = os.path.join(sigmoid_folder, new_sigmoid_filename)
     
     # Load the ORIGINAL sigmoid values from waterfall (NOT mean-subtracted)
@@ -1018,71 +1079,148 @@ def main():
         log(f"Error saving sigmoid: {e}")
         return False
     
-    # Add to sigmoid list
-    add_sigmoid_to_list(dmd_folder, new_sigmoid_filename, kp, sigma)
+    # Save density profile if available
+    if has_density:
+        try:
+            if not os.path.exists(density_path):
+                log(f"Error: Density file not found: {density_path}")
+                has_density = False
+            else:
+                try:
+                    data = np.loadtxt(density_path, comments='#')
+                except ValueError as e:
+                    if "could not convert string" in str(e):
+                        data = np.loadtxt(density_path, comments='#', skiprows=1)
+                    else:
+                        raise
+                
+                if data.ndim != 2 or data.shape[1] != 2:
+                    log(f"Error: Expected 2 columns in density file, got {data.shape}")
+                    has_density = False
+                else:
+                    x_dens = data[:, 0]
+                    y_dens = data[:, 1]
+                    
+                    # Save original density error
+                    header = (f"# Density error profile from waterfall analysis\n"
+                              f"# Saved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                              f"# x (um) vs density error (a.u.)\n"
+                              f"# Error is (density - mean density)")
+                    data_to_save = np.column_stack((x_dens, y_dens))
+                    density_full_path = os.path.join(sigmoid_folder, new_density_filename)
+                    np.savetxt(density_full_path, data_to_save, header=header, fmt='%.6f', delimiter='\t', comments='')
+                    log(f"Saved original density: {new_density_filename} (density error, not corrected)")
+        except Exception as e:
+            log(f"Warning: Error saving density profile: {e}, continuing without it")
+            has_density = False
+    
+    # Add to profiles list (with or without density)
+    if has_density:
+        add_sigmoid_to_list(dmd_folder, new_sigmoid_filename, new_density_filename, 
+                            kp, sigma, kp_d, sigma_d)
+    else:
+        # Backward compatibility: still add with a placeholder
+        add_sigmoid_to_list(dmd_folder, new_sigmoid_filename, '', 
+                            kp, sigma, kp_d, sigma_d)
     
     # =========================================================================
-    # 4) Load ALL sigmoids from the list and apply corrections
+    # 4) Load ALL profiles from the list and apply corrections
     # =========================================================================
-    log("\n--- Step 4: Loading all sigmoids from list and applying corrections ---")
+    log("\n--- Step 4: Loading all profiles from list and applying corrections ---")
     
     sigmoid_list = load_sigmoid_list(dmd_folder)
     
     if not sigmoid_list:
-        log("ERROR: No sigmoids found in feedback_sigmoids_list.py")
-        return False
+        log("ERROR: No profiles found in feedback_sigmoids_list.py")
     
-    log(f"Processing {len(sigmoid_list)} sigmoids:")
+    log(f"Processing {len(sigmoid_list)} profile groups:")
     
     # Start with original profile
     new_profile = old_profile.copy()
     total_error = np.zeros_like(old_profile, dtype=float)
     sigmoid_details = []
     
-    # Process each sigmoid in the list
+    # Process each profile pair in the list
     for i, profile_spec in enumerate(sigmoid_list):
-        filename = profile_spec['filename']
-        profile_kp = profile_spec.get('kp', config.DEFAULT_SMOOTHING_SIGMA)
-        profile_sigma = profile_spec.get('smoothing_sigma', config.DEFAULT_SMOOTHING_SIGMA)
+        # Backward compatibility: handle both old 'filename' and new 'sigmoid_filename' keys
+        sigmoid_filename = profile_spec.get('sigmoid_filename', profile_spec.get('filename'))
+        density_filename = profile_spec.get('density_filename', '')
+        kp_sig = profile_spec.get('kp_sigmoid', profile_spec.get('kp', 0.5))  # Backward compat
+        sigma_sig = profile_spec.get('smoothing_sigma_sigmoid', profile_spec.get('smoothing_sigma', 2.0))
+        kp_dens = profile_spec.get('kp_density', 0.3)
+        sigma_dens = profile_spec.get('smoothing_sigma_density', 3.0)
         
-        log(f"  [{i+1}/{len(sigmoid_list)}] {filename} (kp={profile_kp}, sigma={profile_sigma})")
+        log(f"\n  [{i+1}/{len(sigmoid_list)}] Profile group {i+1}")
         
-        # Load sigmoid - base profile is in DMD folder, update profiles are in magnetization_feedback
-        if filename.startswith('sigmoid_center_interpolation_update_'):
-            sigmoid_file_path = os.path.join(sigmoid_folder, filename)
+        # ===== Load and apply SIGMOID profile =====
+        if sigmoid_filename.startswith('sigmoid_center_interpolation_update_'):
+            sigmoid_file_path = os.path.join(sigmoid_folder, sigmoid_filename)
         else:
-            # Base profile (e.g., sigmoid_center_interpolation0.txt) is in main DMD folder
-            sigmoid_file_path = os.path.join(dmd_folder, filename)
+            sigmoid_file_path = os.path.join(dmd_folder, sigmoid_filename)
         
         if not os.path.exists(sigmoid_file_path):
-            log(f"    WARNING: File not found: {sigmoid_file_path}")
+            log(f"    WARNING: Sigmoid file not found: {sigmoid_file_path}")
             continue
         
         x_sig, sig_values = load_error_profile_from_txt(sigmoid_file_path)
         if x_sig is None:
-            log(f"    WARNING: Could not load {filename}")
+            log(f"    WARNING: Could not load sigmoid {sigmoid_filename}")
             continue
         
         # Extend to full DMD x-range
         sig_extended = extend_error_profile(x_dmd, x_sig, sig_values)
         
-        # Apply smoothing
-        sig_smoothed = gaussian_filter(sig_extended, sigma=profile_sigma)
+        # Subtract mean
+        sig_error = sig_extended - np.mean(sig_extended)
         
-        # Scale and add
-        scaled_sig = profile_kp * sig_smoothed
+        # Apply smoothing
+        sig_smoothed = gaussian_filter(sig_error, sigma=sigma_sig)
+        
+        # Scale
+        scaled_sig = kp_sig * sig_smoothed
         new_profile = new_profile + scaled_sig
         total_error = total_error + scaled_sig
         
+        # Track sigmoid details for visualization
         sigmoid_details.append({
-            'filename': filename,
-            'kp': profile_kp,
-            'sigma': profile_sigma,
+            'filename': sigmoid_filename,
+            'kp': kp_sig,
+            'sigma': sigma_sig,
             'extended': sig_extended,
             'smoothed': sig_smoothed,
         })
         
-        log(f"    Applied: {filename}")
+        log(f"    Sigmoid: {sigmoid_filename} (kp={kp_sig}, sigma={sigma_sig})")
+        
+        # ===== Load and apply DENSITY profile if available =====
+        scaled_dens = None
+        if density_filename and density_filename.strip():  # Check if not empty
+            if density_filename.startswith('density_error_profile_update_'):
+                density_file_path = os.path.join(sigmoid_folder, density_filename)
+            else:
+                density_file_path = os.path.join(dmd_folder, density_filename)
+            
+            if os.path.exists(density_file_path):
+                x_dens, dens_values = load_error_profile_from_txt(density_file_path)
+                if x_dens is not None:
+                    # Extend to full DMD x-range
+                    dens_extended = extend_error_profile(x_dmd, x_dens, dens_values)
+                    
+                    # Apply smoothing
+                    dens_smoothed = gaussian_filter(dens_extended, sigma=sigma_dens)
+                    
+                    # Scale
+                    scaled_dens = kp_dens * dens_smoothed
+                    new_profile = new_profile + scaled_dens
+                    total_error = total_error + scaled_dens
+                    
+                    log(f"    Density:  {density_filename} (kp={kp_dens}, sigma={sigma_dens})")
+                else:
+                    log(f"    WARNING: Could not load density {density_filename}")
+            else:
+                log(f"    Note: No density file found (backward compatibility): {density_filename}", level=2)
+        else:
+            log(f"    (No density profile for this group - sigmoid only)")
     
     # Ensure non-negativity
     min_val = np.min(new_profile)
@@ -1127,7 +1265,7 @@ def main():
     # =========================================================================
     if auto_update_plot:
         log("\n--- Step 7: Updating plot configuration ---")
-        update_plot_config(dmd_folder, new_sigmoid_num, config.NEW_PROFILE_PLOT_LABEL)
+        update_plot_config(dmd_folder, new_profile_num, config.NEW_PROFILE_PLOT_LABEL)
     
     # =========================================================================
     # Summary

@@ -37,8 +37,8 @@ BIAS_FIELD_OFFSET_MG = 129.8
 MG_TO_HZ = 2.1e3
 MG_TO_UG = 1e3
 
-REGION_START_UM = 900
-REGION_END_UM = 1200
+REGION_START_UM = 950
+REGION_END_UM = 1150
 
 
 def log(msg, level=0):
@@ -105,45 +105,65 @@ def main():
     loaded_data = []
     
     for i, profile_spec in enumerate(sigmoid_list):
-        filename = profile_spec['filename']
-        description = profile_spec.get('description', filename)
+        # Handle both old format (filename, kp, smoothing_sigma) and new format (sigmoid_filename, kp_sigmoid, etc.)
+        if 'sigmoid_filename' in profile_spec:
+            # New format with possible density profile
+            sigmoid_filename = profile_spec['sigmoid_filename']
+            density_filename = profile_spec.get('density_filename')
+            kp_sig = profile_spec.get('kp_sigmoid', 0.5)
+            description = profile_spec.get('description', sigmoid_filename)
+        else:
+            # Old format (backward compatibility)
+            sigmoid_filename = profile_spec['filename']
+            density_filename = None
+            kp_sig = profile_spec.get('kp', 0.5)
+            description = profile_spec.get('description', sigmoid_filename)
         
-        filepath = os.path.join(sigmoid_folder, filename)
+        filepath = os.path.join(sigmoid_folder, sigmoid_filename)
         
         if not os.path.exists(filepath):
-            log(f"  [{i+1}/{len(sigmoid_list)}] {filename} - NOT FOUND", level=1)
+            log(f"  [{i+1}/{len(sigmoid_list)}] {sigmoid_filename} - NOT FOUND", level=1)
             continue
         
         x, y = load_sigmoid_txt(filepath)
         if x is None:
-            log(f"  [{i+1}/{len(sigmoid_list)}] {filename} - ERROR", level=1)
+            log(f"  [{i+1}/{len(sigmoid_list)}] {sigmoid_filename} - ERROR", level=1)
             continue
         
+        # Subtract mean from sigmoid (this is the error profile)
+        y_error = y - np.mean(y)
+        
         # Convert to Hz
-        y_hz = (y - BIAS_FIELD_OFFSET_MG) * MG_TO_HZ
+        y_hz = y_error * MG_TO_HZ
         
         loaded_data.append({
             'x': x,
             'y': y_hz,
-            'filename': filename,
+            'filename': sigmoid_filename,
             'label': description,
+            'kp': kp_sig,
+            'has_density': density_filename is not None,
         })
         
-        log(f"  [{i+1}/{len(sigmoid_list)}] {description}")
+        log(f"  [{i+1}/{len(sigmoid_list)}] {description} (kp={kp_sig})")
     
     # Also try to load latest waterfall sigmoid
     waterfall_path = config.NEW_SIGMOID_PATH
     if os.path.exists(waterfall_path):
         x_wf, y_wf = load_sigmoid_txt(waterfall_path)
         if x_wf is not None:
-            y_wf_hz = (y_wf - BIAS_FIELD_OFFSET_MG) * MG_TO_HZ
+            # Subtract mean from waterfall sigmoid as well
+            y_wf_error = y_wf - np.mean(y_wf)
+            y_wf_hz = y_wf_error * MG_TO_HZ
             loaded_data.append({
                 'x': x_wf,
                 'y': y_wf_hz,
                 'filename': os.path.basename(waterfall_path),
                 'label': 'Waterfall (New)',
+                'kp': config.NEW_PROFILE_KP_SIGMOID,
+                'has_density': True,
             })
-            log(f"  [+] Waterfall (New)")
+            log(f"  [+] Waterfall (New) (kp={config.NEW_PROFILE_KP_SIGMOID})")
     
     if not loaded_data:
         log("ERROR: No profiles loaded")
@@ -167,15 +187,15 @@ def main():
     ax1.set_xlabel('Position [μm]', fontsize=11)
     ax1.set_ylabel('Field Detuning [Hz]', fontsize=11)
     
-    # Secondary axis: Bias field in mG
+    # Secondary axis: Bias field in mG (showing the error component)
     secax1 = ax1.secondary_yaxis(
         'right',
         functions=(
-            lambda hz: (hz / MG_TO_HZ) + BIAS_FIELD_OFFSET_MG,
-            lambda mg: (mg - BIAS_FIELD_OFFSET_MG) * MG_TO_HZ,
+            lambda hz: (hz / MG_TO_HZ),  # Convert Hz error back to mG error
+            lambda mg: (mg * MG_TO_HZ),  # Convert mG error to Hz
         ),
     )
-    secax1.set_ylabel('Bias Field [mG]', fontsize=11)
+    secax1.set_ylabel('Field Error [mG]', fontsize=11)
     
     # Shade RMS region
     region_min = min(REGION_START_UM, REGION_END_UM)
@@ -231,8 +251,8 @@ def main():
     secax2 = ax2.secondary_yaxis(
         'right',
         functions=(
-            lambda hz_rms: (hz_rms / MG_TO_HZ) * MG_TO_UG,
-            lambda ug_rms: (ug_rms / MG_TO_UG) * MG_TO_HZ,
+            lambda hz_rms: (hz_rms / MG_TO_HZ) * MG_TO_UG,  # Hz error to μG error
+            lambda ug_rms: (ug_rms / MG_TO_UG) * MG_TO_HZ,  # μG error to Hz
         ),
     )
     secax2.set_ylabel('RMS around mean in region [μG]', fontsize=11)

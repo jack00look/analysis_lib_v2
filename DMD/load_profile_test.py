@@ -48,16 +48,16 @@ plt.show()
 
 print('sending profile')
 profile_y_dmd = np.zeros((1080,1920))
-profile_y_dmd[450:550,910:1010] = 1.
+#profile_y_dmd[450:550,910:1010] = 1.
 #profile_y_dmd[500:550,:] = 1.
-# y_c=500
-# x_c = 960
-# dx = 40
-# dy = 40
-# profile_y_dmd[y_c-dy:y_c+dy,x_c-dx:x_c+dx] = 1.
-# dx_hole = 20
-# dy_hole = 20
-# profile_y_dmd[y_c-dy_hole:y_c+dy_hole,x_c-dx_hole:x_c+dx_hole] = 0.
+y_c=500
+x_c = 960
+dx = 40
+dy = 40
+profile_y_dmd[y_c-dy:y_c+dy,x_c-dx:x_c+dx] = 1.
+dx_hole = 20
+dy_hole = 20
+#profile_y_dmd[y_c-dy_hole:y_c+dy_hole,x_c-dx_hole:x_c+dx_hole] = 0.
 
 profile_x_atoms = np.arange(2048)*1.019
 profile_y_atoms = np.ones_like(profile_x_atoms)
@@ -77,8 +77,8 @@ ax2.legend()
 ax2.grid()
 plt.show()
 
-status = client.load_1d_profile(profile_x_atoms.tolist(), profile_y_atoms.tolist())
-#status = client.load_raw_image_2d(profile_y_dmd.tolist())
+#status = client.load_1d_profile(profile_x_atoms.tolist(), profile_y_atoms.tolist())
+status = client.load_raw_image_2d(profile_y_dmd.tolist())
 print('status: ', status)
 
 client.close()

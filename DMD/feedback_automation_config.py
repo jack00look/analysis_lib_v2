@@ -18,10 +18,10 @@ H5_SHOT_MONTH = 4
 H5_SHOT_DAY = 13
 H5_SHOT_SEQUENCE = 9
 H5_SHOT_ITERATION = 0
-H5_SHOT_REPETITION = 0
+yieldH5_SHOT_REPETITION = 0
 
 # Option 2: Load from a txt file (set USE_H5_PROFILE to False)
-PROFILE_TXT_FILE = 'dmd_profile_20260515_111825.txt'  # Relative to DMD folder or absolute path
+PROFILE_TXT_FILE = 'dmd_profile_20260526_094901.txt'  # Relative to DMD folder or absolute path
 
 # =============================================================================
 # NEW SIGMOID PROFILE LOCATION
@@ -62,13 +62,22 @@ INITIAL_PROFILE_SMOOTHING_SIGMA = 8
 DEFAULT_SMOOTHING_SIGMA = 2.0
 
 # =============================================================================
-# FEEDBACK GAINS (KP)
+# FEEDBACK GAINS (KP) AND SMOOTHING - ERROR PROFILE PARAMETERS
 # =============================================================================
 
-# Proportional gain for the new sigmoid profile
-# This controls how strongly the new profile is applied to the DMD
-# Used for new profiles added via auto_feedback_update.py
-NEW_PROFILE_KP = 0.8
+# Proportional gain for sigmoid center error profile
+# This controls how strongly the sigmoid-based correction is applied to the DMD
+NEW_PROFILE_KP_SIGMOID = 0.5
+
+# Gaussian smoothing sigma for sigmoid center error profile (in pixels)
+NEW_PROFILE_SMOOTHING_SIGMA_SIGMOID = 2.0
+
+# Proportional gain for density error profile
+# This controls how strongly the density-based correction is applied to the DMD
+NEW_PROFILE_KP_DENSITY = 0.3
+
+# Gaussian smoothing sigma for density error profile (in pixels)
+NEW_PROFILE_SMOOTHING_SIGMA_DENSITY = 3.0
 
 # =============================================================================
 # FEEDBACK REGION AND WALLS

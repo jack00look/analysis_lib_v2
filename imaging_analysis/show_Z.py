@@ -62,6 +62,11 @@ cameras = camera_settings.cameras
 PC_TRANSFORM_A = 0  # x' = a + bx
 PC_TRANSFORM_B = 1
 
+# Rescaling parameters for phase contrast n1D overlay
+# x'_pc = PC_N1D_OFFSET + PC_N1D_SCALE * x_pc (in micrometers)
+PC_N1D_OFFSET = -0.000088  # offset in um to align with magnetization
+PC_N1D_SCALE = 1.0   # scale factor to match magnetization amplitude
+
 
 def show_Z(h5file, show=True):
     """
@@ -213,6 +218,7 @@ def show_Z(h5file, show=True):
                 ax_2d.set_xlabel('x [um]' if x_vals is not None else 'x pixel')
                 ax_2d.set_ylabel('y [um]' if y_vals is not None else 'y pixel')
                 plt.colorbar(im, ax=ax_2d, label='n2D [m$^{-2}$]')
+                ax_2d.invert_yaxis()
                 
                 # Overlay ROI rectangles (in physical coordinates)
                 if roi_back_edges is not None:
@@ -235,19 +241,33 @@ def show_Z(h5file, show=True):
                     ax_2d.add_patch(rect_int)
                     logger.info(f"Added roi_integration rectangle")
                 
-                # Compute 1D projections
-                n1D_y_m2 = np.sum(image_2d_m2, axis=0)  # sum over rows (integrate along y)
-                n1D_x_m2 = np.sum(image_2d_m2, axis=1)  # sum over columns (integrate along x)
+                # Compute 1D projections from ROI integration region only
+                roi_int_m2 = cam_abs['roi_integration']
+                image_2d_m2_roi = image_2d_m2[roi_int_m2]
+                n1D_y_m2 = np.sum(image_2d_m2_roi, axis=0)  # sum over rows (integrate along y)
+                n1D_x_m2 = np.sum(image_2d_m2_roi, axis=1)  # sum over columns (integrate along x)
+                
+                # Extract coordinate arrays for ROI region
+                if x_vals is not None and y_vals is not None:
+                    X_1D, Y_1D = np.meshgrid(x_vals, y_vals)
+                    X_1D = X_1D[roi_int_m2]
+                    Y_1D = Y_1D[roi_int_m2]
+                    x_vals_1D_m2 = X_1D[0, :]
+                    y_vals_1D_m2 = Y_1D[:, 0]
+                else:
+                    x_vals_1D_m2 = np.arange(len(n1D_y_m2))
+                    y_vals_1D_m2 = np.arange(len(n1D_x_m2))
                 
                 infos_analysis[f"{m2_key}_n1D_x"] = n1D_x_m2
                 infos_analysis[f"{m2_key}_n1D_y"] = n1D_y_m2
                 
                 # Plot n1D_y at (0,1) - y-integrated profile
-                axes1[0, 1].plot(n1D_y_m2, linewidth=2, color='blue')
+                axes1[0, 1].plot(x_vals_1D_m2, n1D_y_m2, linewidth=2, color='blue')
                 axes1[0, 1].set_title(f'{m2_key} n1D (y-integrated)', fontsize=10)
-                axes1[0, 1].set_xlabel('y pixel')
-                axes1[0, 1].set_ylabel('Intensity')
+                axes1[0, 1].set_xlabel('x [um]' if x_vals is not None else 'x pixel')
+                axes1[0, 1].set_ylabel('n1D')
                 axes1[0, 1].grid(True, alpha=0.3)
+                axes1[0, 1].sharex(axes1[0, 0])  # Share x-axis with m2 n2D
                 
                 # Save metadata
                 for key_info in infos_images_abs[m2_key]:
@@ -276,6 +296,8 @@ def show_Z(h5file, show=True):
                 ax_2d.set_xlabel('x [um]' if x_vals is not None else 'x pixel')
                 ax_2d.set_ylabel('y [um]' if y_vals is not None else 'y pixel')
                 plt.colorbar(im, ax=ax_2d, label='n2D [m$^{-2}$]')
+                ax_2d.invert_yaxis()
+                ax_2d.sharex(axes1[0, 0])  # Share x-axis with m2 n2D
                 
                 # Overlay ROI rectangles (in physical coordinates)
                 if roi_back_edges is not None:
@@ -298,19 +320,33 @@ def show_Z(h5file, show=True):
                     ax_2d.add_patch(rect_int)
                     logger.info(f"Added roi_integration rectangle")
                 
-                # Compute 1D projections
-                n1D_y_m1 = np.sum(image_2d_m1, axis=0)  # sum over rows (integrate along y)
-                n1D_x_m1 = np.sum(image_2d_m1, axis=1)  # sum over columns (integrate along x)
+                # Compute 1D projections from ROI integration region only
+                roi_int_m1 = cam_abs['roi_integration']
+                image_2d_m1_roi = image_2d_m1[roi_int_m1]
+                n1D_y_m1 = np.sum(image_2d_m1_roi, axis=0)  # sum over rows (integrate along y)
+                n1D_x_m1 = np.sum(image_2d_m1_roi, axis=1)  # sum over columns (integrate along x)
+                
+                # Extract coordinate arrays for ROI region
+                if x_vals is not None and y_vals is not None:
+                    X_1D, Y_1D = np.meshgrid(x_vals, y_vals)
+                    X_1D = X_1D[roi_int_m1]
+                    Y_1D = Y_1D[roi_int_m1]
+                    x_vals_1D_m1 = X_1D[0, :]
+                    y_vals_1D_m1 = Y_1D[:, 0]
+                else:
+                    x_vals_1D_m1 = np.arange(len(n1D_y_m1))
+                    y_vals_1D_m1 = np.arange(len(n1D_x_m1))
                 
                 infos_analysis[f"{m1_key}_n1D_x"] = n1D_x_m1
                 infos_analysis[f"{m1_key}_n1D_y"] = n1D_y_m1
                 
                 # Plot n1D_y at (1,1) - y-integrated profile
-                axes1[1, 1].plot(n1D_y_m1, linewidth=2, color='blue')
+                axes1[1, 1].plot(x_vals_1D_m1, n1D_y_m1, linewidth=2, color='blue')
                 axes1[1, 1].set_title(f'{m1_key} n1D (y-integrated)', fontsize=10)
-                axes1[1, 1].set_xlabel('y pixel')
-                axes1[1, 1].set_ylabel('Intensity')
+                axes1[1, 1].set_xlabel('x [um]' if x_vals is not None else 'x pixel')
+                axes1[1, 1].set_ylabel('n1D')
                 axes1[1, 1].grid(True, alpha=0.3)
+                axes1[1, 1].sharex(axes1[0, 0])  # Share x-axis with m2 n2D
                 
                 # Save metadata
                 for key_info in infos_images_abs[m1_key]:
@@ -334,6 +370,24 @@ def show_Z(h5file, show=True):
             pc_keys = sorted([k for k in images_pc.keys() if 'SVD' not in k])
             logger.info(f"Phase contrast image keys: {pc_keys}")
             
+            # Get ROI edges for phase contrast camera
+            roi_back_edges_pc = None
+            roi_int_edges_pc = None
+            x_vals_pc, y_vals_pc = None, None
+            if hasattr(dict_images_pc, 'axes'):
+                try:
+                    x_vals_pc, y_vals_pc, _, _, _ = imaging_analysis_lib_mod.get_axes(dict_images_pc.axes)
+                    logger.info(f"Got PC axes")
+                    if x_vals_pc is not None and y_vals_pc is not None:
+                        try:
+                            roi_back_edges_pc = imaging_analysis_lib_mod.get_roiback_edges(cam_pc, x_vals_pc, y_vals_pc)
+                            roi_int_edges_pc = imaging_analysis_lib_mod.get_roi_integration_edges(cam_pc, x_vals_pc, y_vals_pc)
+                            logger.info(f"Got PC ROI edges")
+                        except Exception as e:
+                            logger.warning(f"Could not get PC ROI edges: {e}")
+                except Exception as e:
+                    logger.warning(f"Could not get PC axes: {e}")
+            
             # Process first available phase contrast image
             if len(pc_keys) > 0:
                 pc_key = pc_keys[0]
@@ -346,23 +400,16 @@ def show_Z(h5file, show=True):
                     # Fallback to raw images if ODlog not available
                     image_2d = images_pc[pc_key]
                 
-                # Get axes info for phase contrast camera
-                x_vals_pc, y_vals_pc = None, None
-                if hasattr(dict_images_pc, 'axes'):
-                    try:
-                        x_vals_pc, y_vals_pc, _, _, _ = imaging_analysis_lib_mod.get_axes(dict_images_pc.axes)
-                        logger.info(f"Got PC axes")
-                    except Exception as e:
-                        logger.warning(f"Could not get PC axes: {e}")
-                
                 # Plot n2D at (2,0) with phase contrast color scaling and colormap
                 ax_2d = axes1[2, 0]
                 
                 # Use extent to display physical coordinates
                 extent = None
                 if x_vals_pc is not None and y_vals_pc is not None:
-                    extent = [x_vals_pc[0], x_vals_pc[-1], y_vals_pc[-1], y_vals_pc[0]]
-                    logger.info(f"Using PC extent: {extent}")
+                    # Apply rescaling to x-coordinates: x' = PC_N1D_OFFSET + PC_N1D_SCALE * x
+                    x_vals_pc_rescaled = PC_N1D_OFFSET + PC_N1D_SCALE * x_vals_pc
+                    extent = [x_vals_pc_rescaled[0], x_vals_pc_rescaled[-1], y_vals_pc[-1], y_vals_pc[0]]  # [left, right, bottom, top]
+                    logger.info(f"Using PC extent with rescaling: {extent}")
                     im = ax_2d.imshow(image_2d, cmap='RdBu', vmin=-1.0, vmax=1.0, 
                                      extent=extent, origin='upper', aspect='auto', interpolation='none')
                 else:
@@ -373,20 +420,65 @@ def show_Z(h5file, show=True):
                 ax_2d.set_xlabel('x [um]' if x_vals_pc is not None else 'x pixel')
                 ax_2d.set_ylabel('y [um]' if y_vals_pc is not None else 'y pixel')
                 plt.colorbar(im, ax=ax_2d, label='Phase Contrast')
+                ax_2d.invert_yaxis()
+                ax_2d.sharex(axes1[0, 0])  # Share x-axis with m2 n2D
                 
-                # Compute 1D projections (y-integrated and x-integrated)
-                n1D_y_pc = np.sum(image_2d, axis=0)  # sum over rows (integrate along y)
-                n1D_x_pc = np.sum(image_2d, axis=1)  # sum over columns (integrate along x)
+                # Overlay ROI rectangles (in physical coordinates, with rescaling for display)
+                if roi_back_edges_pc is not None:
+                    # Rescale ROI coordinates for display
+                    xmin_rescaled = PC_N1D_OFFSET + PC_N1D_SCALE * roi_back_edges_pc.xmin
+                    xmax_rescaled = PC_N1D_OFFSET + PC_N1D_SCALE * roi_back_edges_pc.xmax
+                    rect_back = patches.Rectangle(
+                        (xmin_rescaled, roi_back_edges_pc.ymin),
+                        xmax_rescaled - xmin_rescaled,
+                        roi_back_edges_pc.ymax - roi_back_edges_pc.ymin,
+                        linewidth=2, edgecolor='g', facecolor='none', linestyle='--', label='roi_back'
+                    )
+                    ax_2d.add_patch(rect_back)
+                    logger.info(f"Added PC roi_back rectangle with rescaling")
+                
+                if roi_int_edges_pc is not None:
+                    # Rescale ROI coordinates for display
+                    xmin_rescaled = PC_N1D_OFFSET + PC_N1D_SCALE * roi_int_edges_pc.xmin
+                    xmax_rescaled = PC_N1D_OFFSET + PC_N1D_SCALE * roi_int_edges_pc.xmax
+                    rect_int = patches.Rectangle(
+                        (xmin_rescaled, roi_int_edges_pc.ymin),
+                        xmax_rescaled - xmin_rescaled,
+                        roi_int_edges_pc.ymax - roi_int_edges_pc.ymin,
+                        linewidth=2, edgecolor='b', facecolor='none', linestyle='--', label='roi_integration'
+                    )
+                    ax_2d.add_patch(rect_int)
+                    logger.info(f"Added PC roi_integration rectangle with rescaling")
+                
+                # Compute 1D projections from ROI integration region only
+                roi_int_pc = cam_pc['roi_integration']
+                image_2d_roi = image_2d[roi_int_pc]
+                n1D_y_pc = np.sum(image_2d_roi, axis=0)  # sum over rows (integrate along y)
+                n1D_x_pc = np.sum(image_2d_roi, axis=1)  # sum over columns (integrate along x)
+                
+                # Extract coordinate arrays for ROI region
+                if x_vals_pc is not None and y_vals_pc is not None:
+                    X_1D, Y_1D = np.meshgrid(x_vals_pc, y_vals_pc)
+                    X_1D = X_1D[roi_int_pc]
+                    Y_1D = Y_1D[roi_int_pc]
+                    x_vals_1D_pc = X_1D[0, :]
+                    y_vals_1D_pc = Y_1D[:, 0]
+                else:
+                    x_vals_1D_pc = np.arange(len(n1D_y_pc))
+                    y_vals_1D_pc = np.arange(len(n1D_x_pc))
                 
                 infos_analysis[f"{pc_key}_n1D_x"] = n1D_x_pc
                 infos_analysis[f"{pc_key}_n1D_y"] = n1D_y_pc
                 
                 # Plot n1D_y at (2,1) - y-integrated profile
-                axes1[2, 1].plot(n1D_y_pc, linewidth=2, color='red')
+                # Rescale x-coordinates for display: x' = PC_N1D_OFFSET + PC_N1D_SCALE * x
+                x_vals_1D_pc_rescaled = PC_N1D_OFFSET + PC_N1D_SCALE * x_vals_1D_pc
+                axes1[2, 1].plot(x_vals_1D_pc_rescaled, n1D_y_pc, linewidth=2, color='red')
                 axes1[2, 1].set_title(f'{pc_key} n1D (y-integrated)', fontsize=10)
-                axes1[2, 1].set_xlabel('y pixel')
+                axes1[2, 1].set_xlabel('x [um]' if x_vals_pc is not None else 'x pixel')
                 axes1[2, 1].set_ylabel('Intensity')
                 axes1[2, 1].grid(True, alpha=0.3)
+                axes1[2, 1].sharex(axes1[0, 0])  # Share x-axis with m2 n2D
                 
                 # Save metadata
                 for key_info in infos_images_pc[pc_key]:
@@ -407,46 +499,47 @@ def show_Z(h5file, show=True):
         if has_absorption and ('m1_key' in locals() and m1_key is not None) and ('m2_key' in locals() and m2_key is not None):
             logger.info("Creating magnetization plot at (3,0)")
             
-            # Get absorption n1D data (x-integrated, which are the n1D_x values)
-            n1D_x_m1 = infos_analysis.get(f"{m1_key}_n1D_x", np.array([]))
-            n1D_x_m2 = infos_analysis.get(f"{m2_key}_n1D_x", np.array([]))
+            # Get absorption n1D data (y-integrated, which are the n1D_y values plotted in rows 0 and 1)
+            n1D_y_m1 = infos_analysis.get(f"{m1_key}_n1D_y", np.array([]))
+            n1D_y_m2 = infos_analysis.get(f"{m2_key}_n1D_y", np.array([]))
+            x_vals_1D_m1 = np.array(x_vals_1D_m1) if 'x_vals_1D_m1' in locals() else np.arange(len(n1D_y_m1))
             
-            if len(n1D_x_m1) > 0 and len(n1D_x_m2) > 0:
+            if len(n1D_y_m1) > 0 and len(n1D_y_m2) > 0:
                 # Magnetization: M = (N_m1 - N_m2) / (N_m1 + N_m2)
                 # Handle potential division issues
-                denominator = n1D_x_m1 + n1D_x_m2
+                denominator = n1D_y_m1 + n1D_y_m2
                 magnetization = np.zeros_like(denominator)
                 valid_indices = denominator != 0
-                magnetization[valid_indices] = (n1D_x_m1[valid_indices] - n1D_x_m2[valid_indices]) / denominator[valid_indices]
+                magnetization[valid_indices] = (n1D_y_m1[valid_indices] - n1D_y_m2[valid_indices]) / denominator[valid_indices]
                 
-                x_pixels = np.arange(len(magnetization))
                 ax_mag = axes1[3, 0]
-                ax_mag.plot(x_pixels, magnetization, 'b-', linewidth=2, label='Magnetization Z (absorption)')
+                ax_mag.plot(x_vals_1D_m1, magnetization, 'b-', linewidth=2, label='Magnetization Z (absorption)')
                 infos_analysis['magnetization'] = magnetization
-                
+                ax_mag.sharex(axes1[0, 0])  # Share x-axis with m2 n2D
                 logger.info(f"Computed magnetization with {len(magnetization)} pixels")
                 
                 # Add phase contrast data on same plot if available
                 if has_phase_contrast and 'pc_key' in locals() and 'n1D_y_pc' in locals():
-                    # Transform phase contrast coordinates: x' = a + bx
-                    x_pixels_pc = np.arange(len(n1D_y_pc))
-                    x_pixels_pc_transformed = PC_TRANSFORM_A + PC_TRANSFORM_B * x_pixels_pc
+                    # Use physical coordinates from ROI region
+                    # n1D_y_pc is sum over rows (axis=0), so it corresponds to x-axis (number of columns)
+                    x_vals_1D_pc_use = np.array(x_vals_1D_pc) if 'x_vals_1D_pc' in locals() else np.arange(len(n1D_y_pc))
+                    # Apply rescaling for display: x'_pc = PC_N1D_OFFSET + PC_N1D_SCALE * x_pc
+                    x_vals_1D_pc_rescaled = PC_N1D_OFFSET + PC_N1D_SCALE * x_vals_1D_pc_use
                     
                     # Normalize phase contrast to compare with magnetization
                     n1D_pc_normalized = n1D_y_pc / np.max(np.abs(n1D_y_pc)) if np.max(np.abs(n1D_y_pc)) > 0 else n1D_y_pc
                     
                     ax_mag_right = ax_mag.twinx()
-                    ax_mag_right.plot(x_pixels_pc_transformed, n1D_pc_normalized, 'r-', linewidth=2, 
-                                     label=f'Phase contrast n1D (a={PC_TRANSFORM_A}, b={PC_TRANSFORM_B})')
+                    ax_mag_right.plot(x_vals_1D_pc_rescaled, n1D_pc_normalized, 'r-', linewidth=2, 
+                                     label=f'Phase contrast n1D')
                     ax_mag_right.set_ylabel('Phase contrast (normalized)', fontsize=11, color='r')
                     ax_mag_right.tick_params(axis='y', labelcolor='r')
                     
-                    infos_analysis['n1D_pc_transformed'] = n1D_pc_normalized
-                    infos_analysis['x_pc_transformed'] = x_pixels_pc_transformed
+                    infos_analysis['n1D_pc_normalized'] = n1D_pc_normalized
                     
-                    logger.info(f"Plotted phase contrast with coordinate transformation")
+                    logger.info(f"Plotted phase contrast overlay on magnetization plot")
                 
-                ax_mag.set_xlabel('x pixel', fontsize=11)
+                ax_mag.set_xlabel('x [um]' if 'x_vals_1D_m1' in locals() else 'x pixel', fontsize=11)
                 ax_mag.set_ylabel('Magnetization Z', fontsize=11, color='b')
                 ax_mag.tick_params(axis='y', labelcolor='b')
                 ax_mag.set_title('Magnetization vs Phase Contrast', fontsize=11)

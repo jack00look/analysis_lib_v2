@@ -8,7 +8,7 @@ MODE_CONFIG = {
     'average': True,
     'plots': {
         'main_waterfall': True,
-        'fluctuations_waterfall': True,
+        'fluctuations_waterfall': False,
         'sectioned_sigmoid': True,
         'avg_density_profile': False,
         'avg_magnetization_profile': False,

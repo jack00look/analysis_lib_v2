@@ -19,5 +19,20 @@ MODE_CONFIG = {
         'all_shots_waterfall': False,
     },
     'globals_in_title': [],
-    'domain_balance_fit_window': 0.5,
+    'domain_balance_fit_window': 0.6,
+    
+    # Defect analysis configuration
+    'defect_analysis': {
+        'gaussian_sigma': 0.3,
+        'derivative_threshold': 0.0,
+        'derivative_threshold_pos': 0.05,
+        'derivative_threshold_neg': -0.05,
+        'threshold_scan': False,
+        'zero_crossing_min_distance_um': 5.0,
+        'peak_step_filter_enabled': True,
+        'peak_step_filter_window_px': 4,
+        'peak_step_filter_min_abs_delta_m': 0.25,
+        'min_same_sign_peak_distance_um': 6.0,
+        'missed_defect_correction_method': 'opposite_peak',
+    },
 }

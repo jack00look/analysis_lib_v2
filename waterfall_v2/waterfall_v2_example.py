@@ -41,8 +41,7 @@ import importlib
 mode_config_module = importlib.import_module(f'waterfall_v2.mode_configs.{ACTIVE_MODE}')
 MODE_CONFIG = mode_config_module.MODE_CONFIG
 
-# Import plotting library - USE THE ORIGINAL waterfall/waterfall_lib.py
-sys.path.insert(0, '/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/waterfall')
+# Import plotting library
 from waterfall_lib import waterfall_plot
 from waterfall_v2.common_config import PARAMS
 

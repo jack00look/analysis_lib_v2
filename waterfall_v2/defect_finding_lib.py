@@ -5,11 +5,11 @@ from scipy.ndimage import gaussian_filter1d
 DEFAULT_DEFECT_CONFIG = {
 	'gaussian_sigma': 0.3,
 	'derivative_threshold': 0.0,
-	'derivative_threshold_pos': 0.2,
-	'derivative_threshold_neg': -0.2,
-	'peak_step_filter_enabled': True,
+	'derivative_threshold_pos': 0.07,
+	'derivative_threshold_neg': -0.07,
+	'peak_step_filter_enabled': False,
 	'peak_step_filter_window_px': 4,
-	'peak_step_filter_min_abs_delta_m': 0.7,
+	'peak_step_filter_min_abs_delta_m': 2.,
 	'min_same_sign_peak_distance_um': 7.0,
 	'zero_crossing_min_distance_um': 3.0,
 }

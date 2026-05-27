@@ -8,7 +8,7 @@ ACTIVE_MODE = 'ARP_Backward'  # <-- Set your active mode here. Available: 'ARP_F
 # results/kz_param_stability_safe_box_*.json.
 RECOMMENDED_CENTER = False
 #SEQS = [28]
-SEQS = [13,14]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
+SEQS = [11]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
 #EQS = [41]
 # -------------------------
 # HDF Data Configuration
@@ -17,7 +17,7 @@ HDF_CONFIG = {
     'today': True,  # Set to False to load HDF from a previous day
     'year': 2026,   # Set if today=False (e.g., 2026)
     'month': 5,  # Set if today=False (e.g., 3 for March)
-    'day': 7,    # Set if today=False (e.g., 17)
+    'day': 12,    # Set if today=False (e.g., 17)
 }
 
 # -------------------------
@@ -37,6 +37,14 @@ PARAMS = {
     # Set X range for linear plot of sigmoid center time vs position
     'DOMAIN_WALL_X_MIN': 910,  # Set to um value to enable (e.g., 950)
     'DOMAIN_WALL_X_MAX': 1150,  # Set to um value to enable (e.g., 1150)
+    # Sectioned sigmoid fit region (in micrometers)
+    'SIGMOID_FIT_X_MIN': 1018,
+    'SIGMOID_FIT_X_MAX': 1037,
+    # Error profile parameters for DMD feedback visualization
+    'KP_SIGMOID': 0.5,              # Gain for sigmoid-based error profile
+    'SMOOTHING_SIGMA_SIGMOID': 2.0, # Smoothing for sigmoid error profile
+    'KP_DENSITY': 0.3,              # Gain for density-based error profile
+    'SMOOTHING_SIGMA_DENSITY': 3.0, # Smoothing for density error profile
 }
 
 # -------------------------

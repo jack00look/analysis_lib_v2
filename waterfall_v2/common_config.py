@@ -9,15 +9,23 @@ PARAMS = {
     'SIGMA_Z_LOCAL_AVG': 1.,
     'SIGMA_Z_LOCAL_FLUCT': 1.,
     # Integration window limits are in micrometers (um)
-    'X_MIN_INTEGRATION': 900,
-    'X_MAX_INTEGRATION': 1170,
-    'NUM_SECTIONS': 300,
+    'X_MIN_INTEGRATION': 950,
+    'X_MAX_INTEGRATION': 1150,
+    'NUM_SECTIONS': 100,
     # Set to None for autoscale
-    'WATERFALL_MAG_CLIM': (-.3, .2),
+    'WATERFALL_MAG_CLIM': (-1., 1.),
     'WATERFALL_DENSITY_CLIM': None,
     # Domain wall velocity analysis
     'DOMAIN_WALL_X_MIN': 910,
     'DOMAIN_WALL_X_MAX': 1350,
+    # Sectioned sigmoid fit region (in micrometers)
+    'SIGMOID_FIT_X_MIN': 1018,
+    'SIGMOID_FIT_X_MAX': 1037,
+    # Error profile parameters for DMD feedback visualization
+    'KP_SIGMOID': 0.5,              # Gain for sigmoid-based error profile
+    'SMOOTHING_SIGMA_SIGMOID': 3.0, # Smoothing for sigmoid error profile
+    'KP_DENSITY': 0.5e-10,              # Gain for density-based error profile
+    'SMOOTHING_SIGMA_DENSITY': 3.0, # Smoothing for density error profile
 }
 
 # -------------------------
@@ -30,7 +38,7 @@ MAGNETIZATION_MODALITIES = {
         'type': 'two_component',
         'data_origin': 'show_ODs_v2',
         'atoms_images': ['PTAI_m1', 'PTAI_m2'],
-        'apply_ntot_check': True,
+        'apply_ntot_check': False,
         'affine_correction': {
             'a1': 1.,
             'b1': 0.0,

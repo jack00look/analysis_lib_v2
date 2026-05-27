@@ -6,7 +6,7 @@ import os
 from matplotlib.collections import PolyCollection
 from scipy.ndimage import gaussian_filter1d
 from scipy.interpolate import interp1d
-from waterfall_v2.defect_finding_lib import (
+from waterfall.defect_finding_lib import (
     DEFAULT_DEFECT_CONFIG,
     normalize_defect_config,
     find_defects_in_profile,
@@ -341,6 +341,77 @@ def save_sigmoid_center_interpolation(M_data, x_um, y_vals, y_axis_label, um_per
         
     except Exception as e:
         print(f"Warning: Error in save_sigmoid_center_interpolation: {e}")
+
+
+def save_density_error_profile(section_centers_x, densities, params):
+    """
+    Save density error profile (density - mean) interpolated to fine grid.
+    
+    Used for DMD feedback to provide density-based error signal alongside sigmoid feedback.
+    
+    Parameters
+    ----------
+    section_centers_x : array
+        X-positions of sections (in micrometers)
+    densities : array
+        Density values for each section
+    params : dict
+        Parameters dictionary (unused but kept for compatibility)
+    """
+    try:
+        print(f"[DEBUG] save_density_error_profile called with {len(section_centers_x) if section_centers_x is not None else 0} x-points and {len(densities) if densities is not None else 0} density values")
+        
+        if section_centers_x is None or densities is None:
+            print("Warning: No density data to save")
+            return
+        
+        if len(section_centers_x) < 2 or len(densities) < 2:
+            print(f"Warning: Need at least 2 data points to interpolate density profile (got {len(section_centers_x)} x-points, {len(densities)} densities)")
+            return
+        
+        section_centers_x = np.asarray(section_centers_x)
+        densities = np.asarray(densities)
+        
+        # Filter out NaN values
+        valid_mask = ~(np.isnan(section_centers_x) | np.isnan(densities))
+        section_centers_x = section_centers_x[valid_mask]
+        densities = densities[valid_mask]
+        
+        if len(section_centers_x) < 2:
+            print(f"Warning: Not enough valid density data points after filtering (got {len(section_centers_x)})")
+            return
+        
+        # Compute density error (deviation from mean)
+        density_mean = np.mean(densities)
+        density_error = densities - density_mean
+        
+        # Sort by x position
+        sorted_indices = np.argsort(section_centers_x)
+        section_centers_x_sorted = section_centers_x[sorted_indices]
+        density_error_sorted = density_error[sorted_indices]
+        
+        # Create interpolation function
+        kind = 'cubic' if len(section_centers_x_sorted) >= 4 else 'linear'
+        interp_func = interp1d(section_centers_x_sorted, density_error_sorted, kind=kind, fill_value='extrapolate')
+        
+        # Generate smooth x values for interpolation
+        x_smooth = np.linspace(min(section_centers_x_sorted), max(section_centers_x_sorted), 200)
+        y_smooth = interp_func(x_smooth)
+        
+        # Save to text file in waterfall_v2 script directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        output_file = os.path.join(script_dir, 'density_error_profile.txt')
+        
+        # Normalize density error by dividing by 1e10
+        y_smooth_normalized = y_smooth / 1e10
+        
+        header = f"# Interpolated density error profile (density - mean density) / 1e10\n# x (um) vs density error (a.u.)\n# Interpolation type: {kind}\n"
+        data_to_save = np.column_stack((x_smooth, y_smooth_normalized))
+        np.savetxt(output_file, data_to_save, header=header, fmt='%.6f', delimiter='\t', comments='')
+        print(f"✓ Saved density error profile to: {output_file}")
+        
+    except Exception as e:
+        print(f"Warning: Error in save_density_error_profile: {e}")
 
 
 def _load_camera_settings_module():
@@ -1288,7 +1359,7 @@ def plot_used_region_density_fluctuations(D, y_unique, dy, y_axis_label, title, 
     cbar.set_label(r'Density - shot avg density (a.u.)')
 
 
-def _sectioned_sigmoid_analysis(M, y_unique, x_plot_um, xmin_ind, xmax_ind, num_sections):
+def _sectioned_sigmoid_analysis(M, y_unique, x_plot_um, xmin_ind, xmax_ind, num_sections, D=None, sigmoid_fit_x_min=None, sigmoid_fit_x_max=None):
     from scipy.optimize import curve_fit
 
     def sigmoid(x, x0, k, a, b):
@@ -1296,6 +1367,7 @@ def _sectioned_sigmoid_analysis(M, y_unique, x_plot_um, xmin_ind, xmax_ind, num_
 
     section_edges = np.linspace(xmin_ind, xmax_ind, num_sections + 1, dtype=int)
     sx, sy, se = [], [], []
+    fit_params_all = []  # Store all fit parameters for each section
     avg_density_all = np.mean(M[:, xmin_ind:xmax_ind], axis=0) if xmax_ind > xmin_ind else np.mean(M, axis=0)
 
     for i in range(num_sections):
@@ -1303,16 +1375,29 @@ def _sectioned_sigmoid_analysis(M, y_unique, x_plot_um, xmin_ind, xmax_ind, num_
         if s1 <= s0:
             continue
         integrated = np.sum(M[:, s0:s1], axis=1) / (s1 - s0)
+        
+        # Calculate average density for this section if provided
+        avg_dens = None
+        if D is not None and s1 > s0:
+            avg_dens = np.mean(D[:, s0:s1])
+        
         p0 = [np.median(y_unique), 0.1, np.max(integrated) - np.min(integrated), np.min(integrated)]
         try:
             popt, pcov = curve_fit(sigmoid, y_unique, integrated, p0=p0, maxfev=10000)
-            sx.append(x_plot_um[int((s0 + s1) / 2)])
+            section_center_x = x_plot_um[int((s0 + s1) / 2)] if int((s0 + s1) / 2) < len(x_plot_um) else x_plot_um[int((s0 + s1) / 2) - 1]
+            sx.append(section_center_x)
             sy.append(popt[0])
             se.append(float(np.sqrt(max(0.0, pcov[0, 0]))))
+            fit_params_all.append({'x': section_center_x, 'popt': popt, 'y_data': integrated, 'y_unique': y_unique, 'density': avg_dens})
         except Exception:
             continue
 
-    return sx, sy, se, avg_density_all
+    # Return ALL results for main plot, and also return filtered results for the new figure
+    fit_params_filtered = fit_params_all
+    if sigmoid_fit_x_min is not None and sigmoid_fit_x_max is not None and len(fit_params_all) > 0:
+        fit_params_filtered = [fp for fp in fit_params_all if sigmoid_fit_x_min <= fp['x'] <= sigmoid_fit_x_max]
+
+    return sx, sy, se, avg_density_all, fit_params_all, fit_params_filtered
 
 
 def plot_main_waterfall(
@@ -1339,6 +1424,7 @@ def plot_main_waterfall(
     dw_fit_x=None,
     dw_fit_t=None,
 ):
+    print(f"[DEBUG] plot_main_waterfall() called, scan={scan}, plot_flags keys: {list(plot_flags.keys())}")
     fig, axs = plt.subplots(
         ncols=3,
         tight_layout=True,
@@ -1421,10 +1507,14 @@ def plot_main_waterfall(
         ax_int_std.legend(loc='upper right')
 
     section_centers_x, sigmoid_centers_y, sigmoid_centers_err = [], [], []
+    fit_params_for_plot = []
 
     if plot_flags.get('sectioned_sigmoid', False) and scan in ('ARP_Forward', 'ARP_Backward', 'bubbles', 'bubbles_evolution') and xmax_ind > xmin_ind:
-        section_centers_x, sigmoid_centers_y, sigmoid_centers_err, _ = _sectioned_sigmoid_analysis(
-            M, y_unique, x_plot_um, xmin_ind, xmax_ind, params['NUM_SECTIONS']
+        sigmoid_fit_x_min = params.get('SIGMOID_FIT_X_MIN', None)
+        sigmoid_fit_x_max = params.get('SIGMOID_FIT_X_MAX', None)
+        section_centers_x, sigmoid_centers_y, sigmoid_centers_err, _, fit_params_all, fit_params_for_plot = _sectioned_sigmoid_analysis(
+            M, y_unique, x_plot_um, xmin_ind, xmax_ind, params['NUM_SECTIONS'], D=D,
+            sigmoid_fit_x_min=sigmoid_fit_x_min, sigmoid_fit_x_max=sigmoid_fit_x_max
         )
         if len(section_centers_x) > 0:
             # Apply same scaling as the main plot
@@ -1500,6 +1590,221 @@ def plot_main_waterfall(
                 ax_sig.set_title('Sigmoid center vs x')
             ax_sig.legend(loc='best')
             ax_sig.grid(True, alpha=0.3)
+            
+            # Create a new figure showing the sigmoid fits for the specified range
+            if len(fit_params_for_plot) > 0:
+                fig_sig_fits, ax_sig_fits = plt.subplots(figsize=(12, 8), tight_layout=True)
+                
+                # Define sigmoid function for plotting
+                def sigmoid(x, x0, k, a, b):
+                    return a / (1.0 + np.exp(-(x - x0) / k)) + b
+                
+                colors = plt.cm.viridis(np.linspace(0, 1, len(fit_params_for_plot)))
+                
+                for idx, fit_info in enumerate(fit_params_for_plot):
+                    x_pos = fit_info['x']
+                    popt = fit_info['popt']
+                    y_data = fit_info['y_data']
+                    y_unique = fit_info['y_unique']
+                    
+                    # Plot the data points
+                    ax_sig_fits.scatter(y_unique, y_data, s=20, alpha=0.5, color=colors[idx], label=f'x={x_pos:.1f} μm (data)')
+                    
+                    # Plot the fitted sigmoid curve
+                    y_smooth = np.linspace(y_unique.min(), y_unique.max(), 200)
+                    y_fit = sigmoid(y_smooth, *popt)
+                    ax_sig_fits.plot(y_smooth, y_fit, '-', color=colors[idx], linewidth=2, alpha=0.8, label=f'x={x_pos:.1f} μm (fit)')
+                
+                ax_sig_fits.set_xlabel(y_axis_label, fontsize=12)
+                ax_sig_fits.set_ylabel('Integrated magnetization (a.u.)', fontsize=12)
+                if average:
+                    ax_sig_fits.set_title(f'Sigmoid fits for x ∈ [{params.get("SIGMOID_FIT_X_MIN", "?")}:{params.get("SIGMOID_FIT_X_MAX", "?")}] μm (average)')
+                else:
+                    ax_sig_fits.set_title(f'Sigmoid fits for x ∈ [{params.get("SIGMOID_FIT_X_MIN", "?")}:{params.get("SIGMOID_FIT_X_MAX", "?")}] μm')
+                ax_sig_fits.legend(loc='best', fontsize=9, ncol=2)
+                ax_sig_fits.grid(True, alpha=0.3)
+            
+            # Create a figure showing how sigmoid parameters vary across the x-range
+            if len(section_centers_x) > 1:
+                fig_sig_params, axes_params = plt.subplots(2, 2, figsize=(12, 10), tight_layout=True)
+                
+                # Extract parameters from all fits (for the full range)
+                xs = [fp['x'] for fp in fit_params_all]
+                x0s = [fp['popt'][0] for fp in fit_params_all]  # sigmoid centers
+                ks = [fp['popt'][1] for fp in fit_params_all]   # steepness
+                amps = [fp['popt'][2] for fp in fit_params_all] # amplitude
+                bs = [fp['popt'][3] for fp in fit_params_all]   # baseline
+                
+                # x0: Sigmoid center
+                axes_params[0, 0].plot(xs, x0s, 'o-', color='blue', linewidth=2, markersize=6)
+                axes_params[0, 0].set_xlabel('x position (μm)', fontsize=11)
+                axes_params[0, 0].set_ylabel('x₀ (sigmoid center)', fontsize=11)
+                axes_params[0, 0].set_title('Sigmoid center vs x', fontsize=12)
+                axes_params[0, 0].grid(True, alpha=0.3)
+                
+                # k: Steepness
+                axes_params[0, 1].plot(xs, ks, 'o-', color='green', linewidth=2, markersize=6)
+                axes_params[0, 1].set_xlabel('x position (μm)', fontsize=11)
+                axes_params[0, 1].set_ylabel('k (steepness)', fontsize=11)
+                axes_params[0, 1].set_title('Sigmoid steepness vs x', fontsize=12)
+                axes_params[0, 1].grid(True, alpha=0.3)
+                
+                # a: Amplitude
+                axes_params[1, 0].plot(xs, amps, 'o-', color='red', linewidth=2, markersize=6)
+                axes_params[1, 0].set_xlabel('x position (μm)', fontsize=11)
+                axes_params[1, 0].set_ylabel('a (amplitude)', fontsize=11)
+                axes_params[1, 0].set_title('Sigmoid amplitude vs x', fontsize=12)
+                axes_params[1, 0].grid(True, alpha=0.3)
+                
+                # b: Baseline
+                axes_params[1, 1].plot(xs, bs, 'o-', color='purple', linewidth=2, markersize=6)
+                axes_params[1, 1].set_xlabel('x position (μm)', fontsize=11)
+                axes_params[1, 1].set_ylabel('b (baseline)', fontsize=11)
+                axes_params[1, 1].set_title('Sigmoid baseline vs x', fontsize=12)
+                axes_params[1, 1].grid(True, alpha=0.3)
+                
+                if average:
+                    fig_sig_params.suptitle('Sigmoid fit parameters across x range (average)', fontsize=13, fontweight='bold')
+                else:
+                    fig_sig_params.suptitle('Sigmoid fit parameters across x range', fontsize=13, fontweight='bold')
+            
+            # Create a figure showing amplitude vs density
+            if len(fit_params_all) > 0:
+                fig_amp_dens, (ax_amp, ax_dens) = plt.subplots(1, 2, figsize=(12, 5), tight_layout=True)
+                
+                xs = [fp['x'] for fp in fit_params_all]
+                amps = [fp['popt'][2] for fp in fit_params_all]  # amplitude
+                densities = [fp['density'] if fp['density'] is not None else 0 for fp in fit_params_all]
+                
+                # Compute mean and std for error bars
+                amp_mean = np.mean(amps)
+                amp_std = np.std(amps)
+                dens_mean = np.mean(densities) if any(d > 0 for d in densities) else 0
+                dens_std = np.std(densities) if any(d > 0 for d in densities) else 0
+                
+                # Mark sections with anomalously low density (below mean - 1 sigma)
+                low_dens_threshold = dens_mean - dens_std if dens_std > 0 else dens_mean * 0.5
+                colors_amp = ['red' if d < low_dens_threshold else 'blue' for d in densities]
+                
+                # Left: Amplitude vs x
+                ax_amp.scatter(xs, amps, c=colors_amp, s=50, alpha=0.6, edgecolors='black', linewidth=1)
+                ax_amp.axhline(y=amp_mean, color='blue', linestyle='--', alpha=0.5, label='Mean amplitude')
+                ax_amp.fill_between([min(xs), max(xs)], amp_mean - amp_std, amp_mean + amp_std, alpha=0.2, color='blue')
+                ax_amp.set_xlabel('x position (μm)', fontsize=11)
+                ax_amp.set_ylabel('Amplitude (a)', fontsize=11)
+                ax_amp.set_title('Sigmoid amplitude vs x', fontsize=12)
+                ax_amp.grid(True, alpha=0.3)
+                ax_amp.legend()
+                
+                # Right: Average density vs x
+                ax_dens.scatter(xs, densities, c=colors_amp, s=50, alpha=0.6, edgecolors='black', linewidth=1, label='Density per section')
+                ax_dens.axhline(y=dens_mean, color='blue', linestyle='--', alpha=0.5, label='Mean density')
+                if dens_std > 0:
+                    ax_dens.axhline(y=low_dens_threshold, color='red', linestyle='--', alpha=0.5, label='Low density threshold')
+                    ax_dens.fill_between([min(xs), max(xs)], dens_mean - dens_std, dens_mean + dens_std, alpha=0.2, color='blue')
+                ax_dens.set_xlabel('x position (μm)', fontsize=11)
+                ax_dens.set_ylabel('Average density', fontsize=11)
+                ax_dens.set_title('Density vs x (red = low density)', fontsize=12)
+                ax_dens.grid(True, alpha=0.3)
+                ax_dens.legend()
+                
+                if average:
+                    fig_amp_dens.suptitle('Amplitude and density correlation (average)', fontsize=13, fontweight='bold')
+                else:
+                    fig_amp_dens.suptitle('Amplitude and density correlation', fontsize=13, fontweight='bold')
+            
+            # Create a figure showing error profiles for DMD feedback
+            if len(fit_params_all) > 0:
+                fig_error, axes_error = plt.subplots(3, 1, figsize=(12, 10), tight_layout=True)
+                
+                # Get parameters from config
+                kp_sigmoid = params.get('KP_SIGMOID', 0.5)
+                sigma_sigmoid = params.get('SMOOTHING_SIGMA_SIGMOID', 2.0)
+                kp_density = params.get('KP_DENSITY', 0.3)
+                sigma_density = params.get('SMOOTHING_SIGMA_DENSITY', 3.0)
+                
+                # Extract x positions and create uniform grid
+                xs = np.array([fp['x'] for fp in fit_params_all])
+                
+                # ===== 1) SIGMOID ERROR PROFILE =====
+                # Use sigmoid centers as error signal
+                sigmoid_centers = np.array([fp['popt'][0] for fp in fit_params_all])
+                sigmoid_error = sigmoid_centers - np.mean(sigmoid_centers)
+                
+                # Interpolate to fine grid
+                if len(xs) > 1:
+                    interp_sigmoid_error = np.interp(section_centers_x, xs, sigmoid_error)
+                    # Apply smoothing
+                    smoothed_sigmoid_error = gaussian_filter1d(interp_sigmoid_error, sigma=sigma_sigmoid)
+                else:
+                    smoothed_sigmoid_error = np.zeros_like(section_centers_x)
+                
+                # Apply kp
+                scaled_sigmoid_error = kp_sigmoid * smoothed_sigmoid_error
+                
+                # Plot sigmoid error
+                axes_error[0].plot(section_centers_x, interp_sigmoid_error, 'o-', color='purple', 
+                                  alpha=0.5, markersize=4, linewidth=1, label='Raw sigmoid error')
+                axes_error[0].plot(section_centers_x, smoothed_sigmoid_error, '-', color='purple', 
+                                  linewidth=2, label=f'Smoothed (σ={sigma_sigmoid:.1f})')
+                axes_error[0].plot(section_centers_x, scaled_sigmoid_error, 'g-', linewidth=2.5, 
+                                  label=f'Applied (kp={kp_sigmoid:.2f})')
+                axes_error[0].set_ylabel('Error profile', fontsize=11)
+                axes_error[0].set_title('Sigmoid center error profile for DMD feedback', fontsize=12)
+                axes_error[0].grid(True, alpha=0.3)
+                axes_error[0].axhline(0, color='k', linewidth=0.5, alpha=0.5)
+                axes_error[0].legend(loc='best')
+                
+                # ===== 2) DENSITY ERROR PROFILE =====
+                densities = np.array([fp['density'] if fp['density'] is not None else 0 for fp in fit_params_all])
+                dens_mean = np.mean(densities)
+                density_error = densities - dens_mean
+                
+                # Interpolate to fine grid
+                if len(xs) > 1 and np.any(densities > 0):
+                    interp_density_error = np.interp(section_centers_x, xs, density_error)
+                    # Apply smoothing
+                    smoothed_density_error = gaussian_filter1d(interp_density_error, sigma=sigma_density)
+                else:
+                    smoothed_density_error = np.zeros_like(section_centers_x)
+                
+                # Apply kp
+                scaled_density_error = kp_density * smoothed_density_error
+                
+                # Plot density error
+                axes_error[1].plot(section_centers_x, interp_density_error, 'o-', color='orange', 
+                                  alpha=0.5, markersize=4, linewidth=1, label='Raw density error')
+                axes_error[1].plot(section_centers_x, smoothed_density_error, '-', color='orange', 
+                                  linewidth=2, label=f'Smoothed (σ={sigma_density:.1f})')
+                axes_error[1].plot(section_centers_x, scaled_density_error, 'r-', linewidth=2.5, 
+                                  label=f'Applied (kp={kp_density:.2f})')
+                axes_error[1].set_ylabel('Error profile', fontsize=11)
+                axes_error[1].set_title('Density error profile for DMD feedback', fontsize=12)
+                axes_error[1].grid(True, alpha=0.3)
+                axes_error[1].axhline(0, color='k', linewidth=0.5, alpha=0.5)
+                axes_error[1].legend(loc='best')
+                
+                # ===== 3) COMBINED ERROR PROFILE =====
+                total_error = scaled_sigmoid_error + scaled_density_error
+                
+                # Plot combined
+                axes_error[2].fill_between(section_centers_x, 0, scaled_sigmoid_error, alpha=0.4, 
+                                          color='green', label=f'Sigmoid component (kp={kp_sigmoid:.2f})')
+                axes_error[2].fill_between(section_centers_x, 0, scaled_density_error, alpha=0.4, 
+                                          color='red', label=f'Density component (kp={kp_density:.2f})')
+                axes_error[2].plot(section_centers_x, total_error, 'k-', linewidth=3, alpha=0.9, 
+                                  label='Total error profile')
+                axes_error[2].set_xlabel('x position (μm)', fontsize=11)
+                axes_error[2].set_ylabel('Total error profile', fontsize=11)
+                axes_error[2].set_title('Combined error profile for DMD feedback', fontsize=12)
+                axes_error[2].grid(True, alpha=0.3)
+                axes_error[2].axhline(0, color='k', linewidth=0.5, alpha=0.5)
+                axes_error[2].legend(loc='best')
+                
+                if average:
+                    fig_error.suptitle('DMD feedback error profiles (average)', fontsize=13, fontweight='bold')
+                else:
+                    fig_error.suptitle('DMD feedback error profiles', fontsize=13, fontweight='bold')
 
     ax_m.set_ylabel(y_axis_label if not is_bubbles_evolution else 't [ms]')
     # For bubbles_evolution, convert x-axis from micrometers to meters
@@ -2484,57 +2789,33 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
 
     if scan == 'KZ_det_scan':
         # Plot defects/shot vs ARPKZ_final_set_field using the same logic and parameters as KZ_defect_analysis.
-        gauss_sigma_det = 0.3
-        deriv_threshold_det = 0.055
-        deriv_thr_pos_det = 0.055
-        deriv_thr_neg_det = -0.035
-        threshold_scan_det = False
-        threshold_scan_min_det = 0.02
-        threshold_scan_max_det = 0.20
-        threshold_scan_pos_min_det = 0.02
-        threshold_scan_pos_max_det = 0.20
-        threshold_scan_neg_min_det = -0.20
-        threshold_scan_neg_max_det = -0.02
-        threshold_scan_points_det = 50
-        plateau_delta_defects_det = 0.05
-        plateau_min_points_det = 3
-        zero_cross_min_dist_um_det = 5.0
-        peak_step_filter_enabled_det = False
-        peak_step_filter_window_px_det = 4
-        peak_step_filter_min_abs_delta_m_det = 0.3
-        min_same_sign_peak_distance_um_det = 4.0
-        missed_defect_correction_method_det = 'opposite_peak'
-        try:
-            from waterfall_config import DEFECT_ANALYSIS_PARAMS as _wf_defect_cfg
-            kz_ref_cfg = dict(_wf_defect_cfg) if isinstance(_wf_defect_cfg, dict) else {}
-            det_cfg_override = {}
-            if isinstance(mode_cfg, dict):
-                det_cfg_override.update(mode_cfg.get('defect_analysis_global', {}))
-                det_cfg_override.update(mode_cfg.get('defect_analysis', {}))
-                det_cfg_override.update(mode_cfg.get('defect_analysis_override', {}))
-            det_cfg = dict(kz_ref_cfg)
-            det_cfg.update(det_cfg_override)
-
-            gauss_sigma_det = float(det_cfg.get('gaussian_sigma', gauss_sigma_det))
-            deriv_threshold_det = float(det_cfg.get('derivative_threshold', deriv_threshold_det))
-            deriv_thr_pos_det = float(det_cfg.get('derivative_threshold_pos', deriv_thr_pos_det))
-            deriv_thr_neg_det = float(det_cfg.get('derivative_threshold_neg', -abs(deriv_thr_pos_det)))
-            threshold_scan_det = bool(det_cfg.get('threshold_scan', threshold_scan_det))
-            zero_cross_min_dist_um_det = float(det_cfg.get('zero_crossing_min_distance_um', zero_cross_min_dist_um_det))
-            peak_step_filter_enabled_det = bool(det_cfg.get('peak_step_filter_enabled', peak_step_filter_enabled_det))
-            peak_step_filter_window_px_det = int(det_cfg.get('peak_step_filter_window_px', peak_step_filter_window_px_det))
-            peak_step_filter_min_abs_delta_m_det = float(det_cfg.get('peak_step_filter_min_abs_delta_m', peak_step_filter_min_abs_delta_m_det))
-            min_same_sign_peak_distance_um_det = float(det_cfg.get('min_same_sign_peak_distance_um', min_same_sign_peak_distance_um_det))
-            missed_defect_correction_method_det = str(
-                det_cfg.get('missed_defect_correction_method', missed_defect_correction_method_det)
-            ).strip().lower()
-        except Exception:
-            pass
-        peak_step_filter_window_px_det = max(1, int(peak_step_filter_window_px_det))
-        peak_step_filter_min_abs_delta_m_det = max(0.0, float(peak_step_filter_min_abs_delta_m_det))
-        min_same_sign_peak_distance_um_det = max(0.0, float(min_same_sign_peak_distance_um_det))
-        if missed_defect_correction_method_det not in ('zero_crossing', 'opposite_peak', 'both'):
-            missed_defect_correction_method_det = 'opposite_peak'
+        # Load defect config from mode_cfg
+        defect_cfg_det = dict(mode_cfg.get('defect_analysis_global', {}) if isinstance(mode_cfg, dict) else {})
+        if isinstance(mode_cfg, dict):
+            defect_cfg_det.update(mode_cfg.get('defect_analysis', {}))
+            defect_cfg_det.update(mode_cfg.get('defect_analysis_override', {}))
+        defect_cfg_det = defect_lib.normalize_defect_config(defect_cfg_det)
+        
+        gauss_sigma_det = float(defect_cfg_det['gaussian_sigma'])
+        deriv_threshold_det = float(defect_cfg_det.get('derivative_threshold', 0.055))
+        deriv_thr_pos_det = float(defect_cfg_det['derivative_threshold_pos'])
+        deriv_thr_neg_det = float(defect_cfg_det['derivative_threshold_neg'])
+        threshold_scan_det = bool(defect_cfg_det.get('threshold_scan', False))
+        threshold_scan_min_det = float(defect_cfg_det.get('threshold_scan_pos_min', 0.02))
+        threshold_scan_max_det = float(defect_cfg_det.get('threshold_scan_pos_max', 0.20))
+        threshold_scan_pos_min_det = float(defect_cfg_det.get('threshold_scan_pos_min', 0.02))
+        threshold_scan_pos_max_det = float(defect_cfg_det.get('threshold_scan_pos_max', 0.20))
+        threshold_scan_neg_min_det = float(defect_cfg_det.get('threshold_scan_neg_min', -0.20))
+        threshold_scan_neg_max_det = float(defect_cfg_det.get('threshold_scan_neg_max', -0.02))
+        threshold_scan_points_det = int(defect_cfg_det.get('threshold_scan_points', 50))
+        plateau_delta_defects_det = float(defect_cfg_det.get('plateau_delta_defects', 0.05))
+        plateau_min_points_det = int(defect_cfg_det.get('plateau_min_points', 3))
+        zero_cross_min_dist_um_det = float(defect_cfg_det['zero_crossing_min_distance_um'])
+        peak_step_filter_enabled_det = bool(defect_cfg_det['peak_step_filter_enabled'])
+        peak_step_filter_window_px_det = int(defect_cfg_det['peak_step_filter_window_px'])
+        peak_step_filter_min_abs_delta_m_det = float(defect_cfg_det['peak_step_filter_min_abs_delta_m'])
+        min_same_sign_peak_distance_um_det = float(defect_cfg_det['min_same_sign_peak_distance_um'])
+        missed_defect_correction_method_det = str(defect_cfg_det.get('missed_defect_correction_method', 'opposite_peak')).strip().lower()
 
         x_centers_um_det = np.arange(M_full.shape[1]) * um_per_px
         x_min_um_det = float(params['X_MIN_INTEGRATION'])
@@ -2897,16 +3178,15 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             if defect_edges_x_shot.size > 1:
                 defect_edges_x_shot = np.unique(np.round(defect_edges_x_shot, 6))
             start_sign_shot = _infer_start_sign_from_signed_walls(pos_x, neg_x)
-            det_domain_balance_raw.append(
-                _domain_balance_in_used_region(
-                    m_roi,
-                    x_roi_um_det,
-                    defect_edges_x_shot,
-                    float(x_min_um_det),
-                    float(x_max_um_det),
-                    start_sign=start_sign_shot,
-                )
+            db = _domain_balance_in_used_region(
+                m_roi,
+                x_roi_um_det,
+                defect_edges_x_shot,
+                float(x_min_um_det),
+                float(x_max_um_det),
+                start_sign=start_sign_shot,
             )
+            det_domain_balance_raw.append(db)
 
             for x_thr in np.concatenate([pos_x, neg_x]).astype(float):
                 det_defect_x.append(float(x_thr))
@@ -3441,7 +3721,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         if title_labels:
             title_full += '\n' + ', '.join([f"{l}: {np.unique(_get_column(sorted_df, l).values)}" for l in title_labels if _get_column(sorted_df, l) is not None])
 
-        plot_main_waterfall(
+        fit_params_all_main = plot_main_waterfall(
             M_final,
             D_final,
             y_final,
@@ -3607,22 +3887,20 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             mode_cfg=mode_cfg,
         )
 
-    # Save sigmoid center interpolation (extract from averaged magnetization profile)
+    # Save sigmoid center interpolation and density error profile before showing plot
     # Only save if sectioned_sigmoid plot is enabled
     if plot_flags.get('sectioned_sigmoid', False):
         try:
             save_sigmoid_center_interpolation(
-                M_final if average else M_full,
+                M,
                 x_plot_um,
-                y_final if average else y_raw,
+                y_unique,
                 y_axis_label,
                 um_per_px,
                 params,
             )
         except Exception as e:
-            print(f"Warning: Could not save sigmoid center interpolation: {e}")
-
-    plt.show()
+            print(f"Warning: Could not save sigmoid center interpolation: {e}", flush=True)
 
 
 def run_mode(df, mode_cfg, params):

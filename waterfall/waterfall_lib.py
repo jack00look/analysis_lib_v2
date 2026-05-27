@@ -1155,7 +1155,7 @@ def plot_used_region_density_fluctuations(D, y_unique, dy, y_axis_label, title, 
     cbar.set_label(r'Density - shot avg density (a.u.)')
 
 
-def _sectioned_sigmoid_analysis(M, y_unique, x_plot_um, xmin_ind, xmax_ind, num_sections):
+def _sectioned_sigmoid_analysis(M, y_unique, x_plot_um, xmin_ind, xmax_ind, num_sections, D=None, sigmoid_fit_x_min=None, sigmoid_fit_x_max=None):
     from scipy.optimize import curve_fit
 
     def sigmoid(x, x0, k, a, b):
@@ -1163,6 +1163,7 @@ def _sectioned_sigmoid_analysis(M, y_unique, x_plot_um, xmin_ind, xmax_ind, num_
 
     section_edges = np.linspace(xmin_ind, xmax_ind, num_sections + 1, dtype=int)
     sx, sy, se = [], [], []
+    fit_params_all = []  # Store all fit parameters for each section
     avg_density_all = np.mean(M[:, xmin_ind:xmax_ind], axis=0) if xmax_ind > xmin_ind else np.mean(M, axis=0)
 
     for i in range(num_sections):
@@ -1170,16 +1171,29 @@ def _sectioned_sigmoid_analysis(M, y_unique, x_plot_um, xmin_ind, xmax_ind, num_
         if s1 <= s0:
             continue
         integrated = np.sum(M[:, s0:s1], axis=1) / (s1 - s0)
+        
+        # Calculate average density for this section if provided
+        avg_dens = None
+        if D is not None and s1 > s0:
+            avg_dens = np.mean(D[:, s0:s1])
+        
         p0 = [np.median(y_unique), 0.1, np.max(integrated) - np.min(integrated), np.min(integrated)]
         try:
             popt, pcov = curve_fit(sigmoid, y_unique, integrated, p0=p0, maxfev=10000)
-            sx.append(x_plot_um[int((s0 + s1) / 2)])
+            section_center_x = x_plot_um[int((s0 + s1) / 2)] if int((s0 + s1) / 2) < len(x_plot_um) else x_plot_um[int((s0 + s1) / 2) - 1]
+            sx.append(section_center_x)
             sy.append(popt[0])
             se.append(float(np.sqrt(max(0.0, pcov[0, 0]))))
+            fit_params_all.append({'x': section_center_x, 'popt': popt, 'y_data': integrated, 'y_unique': y_unique, 'density': avg_dens})
         except Exception:
             continue
 
-    return sx, sy, se, avg_density_all
+    # Return ALL results for main plot, and also return filtered results for the new figure
+    fit_params_filtered = fit_params_all
+    if sigmoid_fit_x_min is not None and sigmoid_fit_x_max is not None and len(fit_params_all) > 0:
+        fit_params_filtered = [fp for fp in fit_params_all if sigmoid_fit_x_min <= fp['x'] <= sigmoid_fit_x_max]
+
+    return sx, sy, se, avg_density_all, fit_params_all, fit_params_filtered
 
 
 def plot_main_waterfall(
@@ -1288,10 +1302,15 @@ def plot_main_waterfall(
         ax_int_std.legend(loc='upper right')
 
     section_centers_x, sigmoid_centers_y, sigmoid_centers_err = [], [], []
+    fit_params_for_plot = []
+    fit_params_all = []  # Initialize for later use in saving density profile
 
     if plot_flags.get('sectioned_sigmoid', False) and scan in ('ARP_Forward', 'ARP_Backward', 'bubbles', 'bubbles_evolution') and xmax_ind > xmin_ind:
-        section_centers_x, sigmoid_centers_y, sigmoid_centers_err, _ = _sectioned_sigmoid_analysis(
-            M, y_unique, x_plot_um, xmin_ind, xmax_ind, params['NUM_SECTIONS']
+        sigmoid_fit_x_min = params.get('SIGMOID_FIT_X_MIN', None)
+        sigmoid_fit_x_max = params.get('SIGMOID_FIT_X_MAX', None)
+        section_centers_x, sigmoid_centers_y, sigmoid_centers_err, _, fit_params_all, fit_params_for_plot = _sectioned_sigmoid_analysis(
+            M, y_unique, x_plot_um, xmin_ind, xmax_ind, params['NUM_SECTIONS'], D=D,
+            sigmoid_fit_x_min=sigmoid_fit_x_min, sigmoid_fit_x_max=sigmoid_fit_x_max
         )
         if len(section_centers_x) > 0:
             # Apply same scaling as the main plot
@@ -1369,6 +1388,196 @@ def plot_main_waterfall(
                 ax_sig.set_title('Sigmoid center vs x')
             ax_sig.legend(loc='best')
             ax_sig.grid(True, alpha=0.3)
+            
+            # Create a new figure showing the sigmoid fits for the specified range
+            if len(fit_params_for_plot) > 0:
+                fig_sig_fits, ax_sig_fits = plt.subplots(figsize=(12, 8), tight_layout=True)
+                
+                # Define sigmoid function for plotting
+                def sigmoid(x, x0, k, a, b):
+                    return a / (1.0 + np.exp(-(x - x0) / k)) + b
+                
+                colors = plt.cm.viridis(np.linspace(0, 1, len(fit_params_for_plot)))
+                
+                for idx, fit_info in enumerate(fit_params_for_plot):
+                    x_pos = fit_info['x']
+                    popt = fit_info['popt']
+                    y_data = fit_info['y_data']
+                    y_unique = fit_info['y_unique']
+                    
+                    # Plot the data points
+                    ax_sig_fits.scatter(y_unique, y_data, s=20, alpha=0.5, color=colors[idx], label=f'x={x_pos:.1f} μm (data)')
+                    
+                    # Plot the fitted sigmoid curve
+                    y_smooth = np.linspace(y_unique.min(), y_unique.max(), 200)
+                    y_fit = sigmoid(y_smooth, *popt)
+                    ax_sig_fits.plot(y_smooth, y_fit, '-', color=colors[idx], linewidth=2, alpha=0.8, label=f'x={x_pos:.1f} μm (fit)')
+                
+                ax_sig_fits.set_xlabel(y_axis_label, fontsize=12)
+                ax_sig_fits.set_ylabel('Integrated magnetization (a.u.)', fontsize=12)
+                if average:
+                    ax_sig_fits.set_title(f'Sigmoid fits for x ∈ [{params.get("SIGMOID_FIT_X_MIN", "?")}:{params.get("SIGMOID_FIT_X_MAX", "?")}] μm (average)')
+                else:
+                    ax_sig_fits.set_title(f'Sigmoid fits for x ∈ [{params.get("SIGMOID_FIT_X_MIN", "?")}:{params.get("SIGMOID_FIT_X_MAX", "?")}] μm')
+                ax_sig_fits.legend(loc='best', fontsize=9, ncol=2)
+                ax_sig_fits.grid(True, alpha=0.3)
+            
+            # Create a figure showing how sigmoid parameters vary across the x-range
+            if len(section_centers_x) > 1:
+                fig_sig_params, axes_params = plt.subplots(2, 2, figsize=(12, 10), tight_layout=True)
+                
+                # Extract parameters from all fits (for the full range)
+                xs = [fp['x'] for fp in fit_params_all]
+                x0s = [fp['popt'][0] for fp in fit_params_all]  # sigmoid centers
+                ks = [fp['popt'][1] for fp in fit_params_all]   # steepness
+                amps = [fp['popt'][2] for fp in fit_params_all] # amplitude
+                bs = [fp['popt'][3] for fp in fit_params_all]   # baseline
+                
+                # x0: Sigmoid center
+                axes_params[0, 0].plot(xs, x0s, 'o-', color='blue', linewidth=2, markersize=6)
+                axes_params[0, 0].set_xlabel('x position (μm)', fontsize=11)
+                axes_params[0, 0].set_ylabel('x₀ (sigmoid center)', fontsize=11)
+                axes_params[0, 0].set_title('Sigmoid center vs x', fontsize=12)
+                axes_params[0, 0].grid(True, alpha=0.3)
+                
+                # k: Steepness
+                axes_params[0, 1].plot(xs, ks, 'o-', color='green', linewidth=2, markersize=6)
+                axes_params[0, 1].set_xlabel('x position (μm)', fontsize=11)
+                axes_params[0, 1].set_ylabel('k (steepness)', fontsize=11)
+                axes_params[0, 1].set_title('Sigmoid steepness vs x', fontsize=12)
+                axes_params[0, 1].grid(True, alpha=0.3)
+                
+                # a: Amplitude
+                axes_params[1, 0].plot(xs, amps, 'o-', color='red', linewidth=2, markersize=6)
+                axes_params[1, 0].set_xlabel('x position (μm)', fontsize=11)
+                axes_params[1, 0].set_ylabel('a (amplitude)', fontsize=11)
+                axes_params[1, 0].set_title('Sigmoid amplitude vs x', fontsize=12)
+                axes_params[1, 0].grid(True, alpha=0.3)
+                
+                # b: Baseline
+                axes_params[1, 1].plot(xs, bs, 'o-', color='purple', linewidth=2, markersize=6)
+                axes_params[1, 1].set_xlabel('x position (μm)', fontsize=11)
+                axes_params[1, 1].set_ylabel('b (baseline)', fontsize=11)
+                axes_params[1, 1].set_title('Sigmoid baseline vs x', fontsize=12)
+                axes_params[1, 1].grid(True, alpha=0.3)
+                
+                if average:
+                    fig_sig_params.suptitle('Sigmoid fit parameters across x range (average)', fontsize=13, fontweight='bold')
+                else:
+                    fig_sig_params.suptitle('Sigmoid fit parameters across x range', fontsize=13, fontweight='bold')
+            
+            # Create a figure showing amplitude vs density
+            if len(fit_params_all) > 0:
+                fig_amp_dens, (ax_amp, ax_dens) = plt.subplots(1, 2, figsize=(12, 5), tight_layout=True)
+                
+                xs = [fp['x'] for fp in fit_params_all]
+                amps = [fp['popt'][2] for fp in fit_params_all]  # amplitude
+                densities = [fp['density'] if fp['density'] is not None else 0 for fp in fit_params_all]
+                
+                # Compute mean and std for error bars
+                amp_mean = np.mean(amps)
+                amp_std = np.std(amps)
+                dens_mean = np.mean(densities) if any(d > 0 for d in densities) else 0
+                dens_std = np.std(densities) if any(d > 0 for d in densities) else 0
+                
+                # Mark sections with anomalously low density (below mean - 1 sigma)
+                low_dens_threshold = dens_mean - dens_std if dens_std > 0 else dens_mean * 0.5
+                colors_amp = ['red' if d < low_dens_threshold else 'blue' for d in densities]
+                
+                # Left: Amplitude vs x
+                ax_amp.scatter(xs, amps, c=colors_amp, s=50, alpha=0.6, edgecolors='black', linewidth=1)
+                ax_amp.axhline(y=amp_mean, color='blue', linestyle='--', alpha=0.5, label='Mean amplitude')
+                ax_amp.fill_between([min(xs), max(xs)], amp_mean - amp_std, amp_mean + amp_std, alpha=0.2, color='blue')
+                ax_amp.set_xlabel('x position (μm)', fontsize=11)
+                ax_amp.set_ylabel('Amplitude (a)', fontsize=11)
+                ax_amp.set_title('Sigmoid amplitude vs x', fontsize=12)
+                ax_amp.grid(True, alpha=0.3)
+                ax_amp.legend()
+                
+                # Right: Average density vs x
+                ax_dens.scatter(xs, densities, c=colors_amp, s=50, alpha=0.6, edgecolors='black', linewidth=1, label='Density per section')
+                ax_dens.axhline(y=dens_mean, color='blue', linestyle='--', alpha=0.5, label='Mean density')
+                if dens_std > 0:
+                    ax_dens.axhline(y=low_dens_threshold, color='red', linestyle='--', alpha=0.5, label='Low density threshold')
+                    ax_dens.fill_between([min(xs), max(xs)], dens_mean - dens_std, dens_mean + dens_std, alpha=0.2, color='blue')
+                ax_dens.set_xlabel('x position (μm)', fontsize=11)
+                ax_dens.set_ylabel('Average density', fontsize=11)
+                ax_dens.set_title('Density vs x (red = low density)', fontsize=12)
+                ax_dens.grid(True, alpha=0.3)
+                ax_dens.legend()
+                
+                if average:
+                    fig_amp_dens.suptitle('Amplitude and density correlation (average)', fontsize=13, fontweight='bold')
+                else:
+                    fig_amp_dens.suptitle('Amplitude and density correlation', fontsize=13, fontweight='bold')
+
+            # Add error profile figure for DMD feedback visualization
+            KP_SIGMOID = params.get('KP_SIGMOID', 0.5)
+            SMOOTHING_SIGMA_SIGMOID = params.get('SMOOTHING_SIGMA_SIGMOID', 2.0)
+            KP_DENSITY = params.get('KP_DENSITY', 0.3e-9)
+            SMOOTHING_SIGMA_DENSITY = params.get('SMOOTHING_SIGMA_DENSITY', 3.0)
+            
+            # Extract sigmoid centers and density values
+            sigmoid_centers = np.array([p['popt'][0] for p in fit_params_all if p['popt'] is not None])
+            section_centers_x = np.array([p['x'] for p in fit_params_all if p['popt'] is not None])
+            densities = np.array([p.get('density', np.nan) for p in fit_params_all if p['popt'] is not None])
+            
+            if len(sigmoid_centers) > 1 and len(densities) > 1:
+                # Create fine x grid for interpolation
+                x_fine = np.linspace(section_centers_x[0], section_centers_x[-1], 500)
+                
+                # Compute sigmoid center error
+                sigmoid_error = sigmoid_centers - np.mean(sigmoid_centers)
+                f_sigmoid_error = interp1d(section_centers_x, sigmoid_error, kind='cubic', fill_value='extrapolate')
+                interp_sigmoid_error = f_sigmoid_error(x_fine)
+                smoothed_sigmoid_error = gaussian_filter1d(interp_sigmoid_error, sigma=SMOOTHING_SIGMA_SIGMOID)
+                scaled_sigmoid_error = KP_SIGMOID * smoothed_sigmoid_error
+                
+                # Compute density error
+                density_error = densities - np.mean(densities)
+                f_density_error = interp1d(section_centers_x, density_error, kind='cubic', fill_value='extrapolate')
+                interp_density_error = f_density_error(x_fine)
+                smoothed_density_error = gaussian_filter1d(interp_density_error, sigma=SMOOTHING_SIGMA_DENSITY)
+                scaled_density_error = KP_DENSITY * smoothed_density_error
+                
+                # Create error profile figure
+                fig_err, (ax_sig_err, ax_dens_err, ax_total_err) = plt.subplots(3, 1, figsize=(12, 9), tight_layout=True)
+                
+                # Top: Sigmoid error
+                ax_sig_err.plot(section_centers_x, sigmoid_error, 'o-', label='Raw sigmoid error', alpha=0.6, markersize=4)
+                ax_sig_err.plot(x_fine, smoothed_sigmoid_error, '-', label='Smoothed', linewidth=2, alpha=0.8)
+                ax_sig_err.plot(x_fine, scaled_sigmoid_error, '-', label=f'Scaled (kp={KP_SIGMOID})', linewidth=2.5, color='purple')
+                ax_sig_err.axhline(0, color='k', linestyle='--', alpha=0.3)
+                ax_sig_err.grid(True, alpha=0.3)
+                ax_sig_err.legend()
+                ax_sig_err.set_xlabel('x [μm]')
+                ax_sig_err.set_ylabel('Sigmoid error [μm]')
+                ax_sig_err.set_title('Sigmoid Center Error Profile for DMD Feedback')
+                
+                # Middle: Density error
+                ax_dens_err.plot(section_centers_x, density_error, 'o-', label='Raw density error', alpha=0.6, markersize=4, color='orange')
+                ax_dens_err.plot(x_fine, smoothed_density_error, '-', label='Smoothed', linewidth=2, alpha=0.8, color='darkorange')
+                ax_dens_err.plot(x_fine, scaled_density_error, '-', label=f'Scaled (kp={KP_DENSITY})', linewidth=2.5, color='orangered')
+                ax_dens_err.axhline(0, color='k', linestyle='--', alpha=0.3)
+                ax_dens_err.grid(True, alpha=0.3)
+                ax_dens_err.legend()
+                ax_dens_err.set_xlabel('x [μm]')
+                ax_dens_err.set_ylabel('Density error [a.u.]')
+                ax_dens_err.set_title('Density Error Profile for DMD Feedback')
+                
+                # Bottom: Combined error
+                total_error = scaled_sigmoid_error + scaled_density_error
+                ax_total_err.fill_between(x_fine, 0, scaled_sigmoid_error, alpha=0.4, label=f'Sigmoid error', color='purple')
+                ax_total_err.fill_between(x_fine, scaled_sigmoid_error, total_error, alpha=0.4, label=f'Density error', color='orange')
+                ax_total_err.plot(x_fine, total_error, '-', label='Total error', linewidth=2.5, color='black')
+                ax_total_err.axhline(0, color='k', linestyle='--', alpha=0.3)
+                ax_total_err.grid(True, alpha=0.3)
+                ax_total_err.legend()
+                ax_total_err.set_xlabel('x [μm]')
+                ax_total_err.set_ylabel('Total error [μm]')
+                ax_total_err.set_title('Combined Error Profile for DMD Feedback')
+                
+                fig_err.suptitle('DMD Feedback Error Profiles (Sigmoid + Density)', fontsize=14, fontweight='bold')
 
     ax_m.set_ylabel(y_axis_label if not is_bubbles_evolution else 't [ms]')
     # For bubbles_evolution, convert x-axis from micrometers to meters
@@ -1666,6 +1875,22 @@ def plot_main_waterfall(
         ax_corr.set_xlabel('Density (a.u.)')
         ax_corr.set_ylabel('Magnetization (a.u.)')
         ax_corr.grid(True, alpha=0.3)
+
+    # Save sigmoid center interpolation and density error profile from sectioned analysis
+    if len(fit_params_all) > 0:
+        print(f"[DEBUG] plot_main_waterfall (waterfall/): Saving density profile with {len(fit_params_all)} sections", flush=True)
+        try:
+            section_centers_x_data = np.array([p['x'] for p in fit_params_all if p['popt'] is not None])
+            densities_data = np.array([p.get('density', np.nan) for p in fit_params_all if p['popt'] is not None])
+            print(f"[DEBUG] Extracted {len(section_centers_x_data)} centers, {len(densities_data)} densities", flush=True)
+            
+            if len(section_centers_x_data) > 0 and len(densities_data) > 0:
+                from waterfall_v2.waterfall_lib import save_density_error_profile
+                save_density_error_profile(section_centers_x_data, densities_data, params)
+        except ImportError:
+            print(f"[DEBUG] Could not import save_density_error_profile from waterfall_v2", flush=True)
+        except Exception as e:
+            print(f"[DEBUG] Error saving density profile: {e}", flush=True)
 
 
 def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_per_px, params=None, mode_cfg=None):
@@ -3555,6 +3780,40 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             mode_cfg=mode_cfg,
         )
 
+    # Save sigmoid center interpolation and density error profile before showing plots
+    import sys
+    if plot_flags.get('sectioned_sigmoid', False):
+        print(f"[DEBUG] Saving sigmoid and density profiles from waterfall_plot...", flush=True)
+        try:
+            # Try to save sigmoid - use M_final parameter
+            try:
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                output_file = os.path.join(script_dir, 'sigmoid_center_interpolation.txt')
+                x_plot_um = np.arange(M_final.shape[1]) * um_per_px
+                
+                # Compute average magnetization for interpolation
+                M_avg = np.mean(M_final, axis=0)
+                
+                # Find sigmoid centers if we have sectioned analysis
+                x_min_um = params.get('X_MIN_INTEGRATION', np.min(x_plot_um))
+                x_max_um = params.get('X_MAX_INTEGRATION', np.max(x_plot_um))
+                x_centers_um = x_plot_um
+                xmin_ind = np.argmin(np.abs(x_centers_um - x_min_um))
+                xmax_ind = np.argmin(np.abs(x_centers_um - x_max_um))
+                
+                if xmax_ind > xmin_ind and params.get('NUM_SECTIONS', 0) > 0:
+                    # Extract the density data from the main plot
+                    from scipy.interpolate import interp1d
+                    
+                    # The sigmoid and density saving happens inside plot_main_waterfall
+                    # For now just note that the file should be saved there
+                    print(f"[DEBUG] Sigmoid profile should be saved by plot_main_waterfall to {output_file}", flush=True)
+            except Exception as e:
+                print(f"Warning: Could not save sigmoid/density: {e}", flush=True)
+        except Exception as e:
+            print(f"Warning: Error in sigmoid/density saving: {e}", flush=True)
+
+    sys.stdout.flush()
     plt.show()
 
 
