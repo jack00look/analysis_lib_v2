@@ -4,6 +4,7 @@ Main waterfall_v2 configuration - User settings
 Set ACTIVE_MODE, SEQS, and HDF_CONFIG here.
 Mode-specific configurations are loaded automatically from mode_configs/ subfolder.
 """
+#test
 
 # Set this to pick which mode to run
 ACTIVE_MODE = 'ARP_Backward'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
