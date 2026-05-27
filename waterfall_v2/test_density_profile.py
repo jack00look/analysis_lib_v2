@@ -19,7 +19,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from waterfall_v2.waterfall_lib import plot_main_waterfall, _sectioned_sigmoid_analysis
+from waterfall.waterfall_lib import plot_main_waterfall, _sectioned_sigmoid_analysis
 
 def test_density_profile_save():
     """Test that density profiles are saved correctly."""

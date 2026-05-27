@@ -42,7 +42,7 @@ mode_config_module = importlib.import_module(f'waterfall_v2.mode_configs.{ACTIVE
 MODE_CONFIG = mode_config_module.MODE_CONFIG
 
 # Import plotting library
-from waterfall_lib import waterfall_plot
+from waterfall.waterfall_lib import waterfall_plot
 from waterfall_v2.common_config import PARAMS
 
 
@@ -123,40 +123,28 @@ def main():
     logger.info("GENERATING WATERFALL PLOTS")
     logger.info(f"{'='*80}\n")
     
-    # Get plot configuration
-    plot_flags = MODE_CONFIG['plots']
-    constraints = MODE_CONFIG.get('constraints')
-    average = MODE_CONFIG.get('average', False)
-    globals_in_title = MODE_CONFIG.get('globals_in_title', [])
-    
     try:
-        logger.info("Preparing data for waterfall_plot...")
+        logger.info("Preparing mode config...")
         
-        # Data is already in correct lyse format.
-        # waterfall_lib now handles tuple column format natively.
-        df_waterfall = df.copy()
+        # Set seqs in mode config (required by run_mode)
+        MODE_CONFIG['seqs'] = seqs_to_load
         
-        logger.info(f"Calling waterfall_plot...")
+        # Inject shared configs into mode runtime payload (like waterfall_FLAT_v4 does)
+        from waterfall_v2.common_config import SHOT_FILTER_CONFIG, DEFECT_ANALYSIS_PARAMS
+        MODE_CONFIG['shot_filter'] = dict(SHOT_FILTER_CONFIG)
+        MODE_CONFIG['magnetization_modalities'] = dict(MAGNETIZATION_MODALITIES)
+        MODE_CONFIG['defect_analysis_global'] = dict(DEFECT_ANALYSIS_PARAMS)
         
-        waterfall_plot(
-            df=df_waterfall,
-            seqs=seqs_to_load if seqs_to_load else None,
-            scan=MODE_CONFIG['scan'],
-            data_origin=MODE_CONFIG['data_origin'],
-            constraints=constraints,
-            average=average,
-            title_labels=None,
-            globals_in_title=globals_in_title,
-            params=PARAMS,
-            plot_flags=plot_flags,
-            mode_cfg=MODE_CONFIG
-        )
+        logger.info("Calling run_mode to generate waterfall plots...")
+        from waterfall.waterfall_lib import run_mode
+        run_mode(df, MODE_CONFIG, PARAMS)
         logger.info("✓ Waterfall plots generated successfully!")
         
     except Exception as e:
         logger.error(f"Error generating plots: {e}")
         import traceback
         traceback.print_exc()
+        return None
     
     logger.info(f"\n{'='*80}")
     logger.info("Ready for further analysis (e.g., waterfall plots, fitting, etc.)")

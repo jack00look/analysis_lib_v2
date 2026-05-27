@@ -15,7 +15,7 @@ ACTIVE_MODE = 'ARP_Backward'  # <-- Set your active mode here. Available: 'ARP_F
 #   - bubbles, bubbles_evolution, bubbles_repeat
 
 # Optional override for sequence indices (set to None to use mode default)
-SEQS = [11]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
+SEQS = [23]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
 
 # -------------------------
 # HDF Data Configuration

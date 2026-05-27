@@ -1,0 +1,89 @@
+#!/usr/bin/env python
+"""
+Quick start guide for running waterfall_v2_example.py
+
+This script demonstrates the complete waterfall analysis workflow.
+"""
+
+print("""
+WATERFALL V2 EXAMPLE - QUICK START
+===================================
+
+1. SETUP YOUR CONFIGURATION
+   Edit waterfall_v2/waterfall_config.py:
+   
+   ACTIVE_MODE = 'ARP_Backward'  # Choose your mode
+   SEQS = [11]                    # Choose sequence indices
+   
+   HDF_CONFIG = {
+       'today': True,             # True = load live Lyse data
+                                  # False = load HDF from day folder
+       'year': 2026,
+       'month': 5,
+       'day': 25,
+       'reanalyzed': False,       # False = load from NAS
+                                  # True = load from data_reanalyzed/
+   }
+
+2. RUN THE SCRIPT
+   cd /home/rick/labscript-suite/userlib/analysislib/analysislib_v2
+   
+   python waterfall_v2/waterfall_v2_example.py
+
+3. EXPECTED OUTPUT
+   - Logs showing data loading progress
+   - Shot quality filtering summary
+   - Waterfall plot generation
+   - Plots saved to disk (figure windows may appear)
+
+4. DATA FLOW
+   
+   waterfall_v2_example.py
+       ↓
+   get_day_data(HDF_CONFIG)
+       ↓ (loads DataFrame)
+   waterfall_plot()
+       ├─ filter_dataframe()         [filter by sequence]
+       ├─ build_magnetization_inputs() [extract n1D profiles]
+       ├─ get_valid_rows_mask()      [quality filtering]
+       ├─ _build_group_indices()     [group by scan param]
+       ├─ Average profiles           [if average=True]
+       └─ Generate plots
+
+5. TROUBLESHOOTING
+
+   Q: No data loaded?
+   A: Check:
+      - HDF_CONFIG['today'] setting
+      - If today=True: Is Lyse running?
+      - If today=False: Do HDF files exist for that date?
+      - Check logs for specific error messages
+
+   Q: Plotting doesn't work?
+   A: Check:
+      - Are there valid shots after quality filtering?
+      - Check magnetization profile extraction
+      - Verify matplotlib backend (check with: python -c "import matplotlib; print(matplotlib.get_backend())")
+      - Try: matplotlib.use('TkAgg') or 'Qt5Agg'
+
+   Q: Import errors?
+   A: Ensure you're in the correct directory:
+      cd /home/rick/labscript-suite/userlib/analysislib/analysislib_v2
+      
+      And conda environment is activated:
+      conda activate labscr_py38
+
+6. KEY FILES
+
+   waterfall_config.py        ← Edit here to change settings
+   mode_configs/ARP_Backward.py ← Mode-specific config
+   common_config.py           ← Shared parameters
+   waterfall_v2_example.py    ← Main entry point
+   multishot_lib/main.py      ← Data loading logic
+   waterfall_lib.py           ← Plotting logic
+""")
+
+if __name__ == '__main__':
+    print("\nTo run the example:")
+    print("  cd /home/rick/labscript-suite/userlib/analysislib/analysislib_v2")
+    print("  python waterfall_v2/waterfall_v2_example.py")

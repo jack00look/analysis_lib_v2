@@ -9,9 +9,9 @@ PARAMS = {
     'SIGMA_Z_LOCAL_AVG': 1.,
     'SIGMA_Z_LOCAL_FLUCT': 1.,
     # Integration window limits are in micrometers (um)
-    'X_MIN_INTEGRATION': 950,
-    'X_MAX_INTEGRATION': 1150,
-    'NUM_SECTIONS': 100,
+    'X_MIN_INTEGRATION': 900,
+    'X_MAX_INTEGRATION': 1200,
+    'NUM_SECTIONS': 300,
     # Set to None for autoscale
     'WATERFALL_MAG_CLIM': (-1., 1.),
     'WATERFALL_DENSITY_CLIM': None,
@@ -58,4 +58,44 @@ MAGNETIZATION_MODALITIES = {
         'atoms_images': ['PHC_1', 'PHC_2', 'PHC_3', 'PHC_4'],
         'apply_ntot_check': False,
     },
+}
+
+# -------------------------
+# Shot quality filtering configuration
+# -------------------------
+SHOT_FILTER_CONFIG = {
+    'enabled': True,
+    'apply_back_check': True,
+    'apply_sat_check': False,
+    'apply_probe_norm_err_check': False,
+    'back_threshold': 0.05,
+    'sat_threshold': 0.001,
+    'probe_norm_err_threshold': 1.0,
+    'ntot_threshold': 7e5,
+}
+
+# -------------------------
+# Global defect-finding algorithm parameters
+# -------------------------
+DEFECT_ANALYSIS_PARAMS = {
+    # 1) Signal preprocessing
+    'gaussian_sigma': 1.5,                 # Gaussian smoothing sigma (pixels)
+
+    # 2) Peak detection on dM/dx
+    'derivative_threshold': 0.0,           # Backward-compatible base magnitude
+    'derivative_threshold_pos': 0.1,       # +dM/dx threshold for positive peaks
+    'derivative_threshold_neg': -0.1,      # -dM/dx threshold for negative peaks
+
+    # 3) Post-threshold peak quality filter (on magnetization step)
+    'peak_step_filter_enabled': True,
+    'peak_step_filter_window_px': 4,
+    'peak_step_filter_min_abs_delta_m': 0.4,
+
+    # 4) Geometric cleanup and correction
+    'min_same_sign_peak_distance_um': 10.0,
+    'zero_crossing_min_distance_um': 3.0,
+
+    # 5) Histogram control
+    'defect_position_hist_half_window_um': 4.0,
+    'defect_size_hist_bin_size': 5.,
 }

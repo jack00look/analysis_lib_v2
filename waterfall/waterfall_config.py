@@ -8,7 +8,7 @@ ACTIVE_MODE = 'ARP_Backward'  # <-- Set your active mode here. Available: 'ARP_F
 # results/kz_param_stability_safe_box_*.json.
 RECOMMENDED_CENTER = False
 #SEQS = [28]
-SEQS = [11]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
+SEQS = [23]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
 #EQS = [41]
 # -------------------------
 # HDF Data Configuration
@@ -139,7 +139,7 @@ DEFECT_ANALYSIS_PARAMS = {
 DEFAULT_PLOTS = {
     'main_waterfall': True,
     'fluctuations_waterfall': True,
-    'sectioned_sigmoid': False,
+    'sectioned_sigmoid': True,
     'avg_density_profile': False,
     'avg_magnetization_profile': False,
     'corr_sigmoid_density': False,

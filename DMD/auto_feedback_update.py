@@ -987,6 +987,9 @@ def main():
     log("\n--- Step 2: Loading new sigmoid profile from waterfall ---")
     
     sigmoid_path = config.NEW_SIGMOID_PATH
+    log(f"DEBUG: config.NEW_SIGMOID_PATH = {config.NEW_SIGMOID_PATH}", level=1)
+    log(f"DEBUG: sigmoid_path = {sigmoid_path}", level=1)
+    log(f"DEBUG: os.path.exists(sigmoid_path) = {os.path.exists(sigmoid_path)}", level=1)
     
     # If path doesn't exist, try alternatives
     if not os.path.exists(sigmoid_path):
@@ -994,10 +997,13 @@ def main():
         
         # Try relative path in waterfall folder
         alt_path1 = os.path.join(os.path.dirname(dmd_folder), 'waterfall', 'sigmoid_center_interpolation.txt')
+        log(f"DEBUG: Trying alternative path: {alt_path1}", level=1)
+        log(f"DEBUG: os.path.exists(alt_path1) = {os.path.exists(alt_path1)}", level=1)
         
         if os.path.exists(alt_path1):
             sigmoid_path = alt_path1
             log(f"Using alternative path: {sigmoid_path}", level=2)
+            log(f"DEBUG: Final sigmoid_path = {sigmoid_path}", level=1)
         else:
             log(f"ERROR: New sigmoid file not found at {sigmoid_path}")
             log(f"       Also tried: {alt_path1}")
@@ -1008,6 +1014,8 @@ def main():
     if x_sigmoid is None:
         log("ERROR: Could not load new sigmoid profile. Exiting.")
         return False
+    
+    log(f"DEBUG: Successfully loaded sigmoid from: {sigmoid_path}", level=1)
     
     # Try to load density profile (backward compatible - optional)
     density_path = sigmoid_path.replace('sigmoid_center_interpolation.txt', 'density_error_profile.txt')

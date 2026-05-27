@@ -25,17 +25,21 @@ logger = logging.getLogger(__name__)
 
 def get_day_data(hdf_config, hdf_root=None):
     """
-    Load all Lyse result DataFrames from a specific day.
+    Load Lyse result DataFrames from a specific day.
     
-    Loads and concatenates HDF result files from:
-    - /home/{user}/NAS542_dataBEC2/year/month/day/ (default)
-    - /path/to/analysislib_v2/data_reanalyzed/year/month/day/ (if reanalyzed=True)
+    When today=True:
+        - Loads live Lyse data (shots in memory, not yet saved to disk)
+    
+    When today=False:
+        - Loads all HDF result files from the day folder:
+          - /home/{user}/NAS542_dataBEC2/year/month/day/ (default)
+          - /path/to/analysislib_v2/data_reanalyzed/year/month/day/ (if reanalyzed=True)
     
     Parameters
     ----------
     hdf_config : dict
         Configuration dictionary with keys:
-        - 'today': bool, if True use today's date
+        - 'today': bool, if True use live Lyse data, if False use HDF files from day folder
         - 'year': int (used if today=False)
         - 'month': int (used if today=False)
         - 'day': int (used if today=False)
@@ -53,7 +57,25 @@ def get_day_data(hdf_config, hdf_root=None):
     """
     import getpass
     
-    # Check if using reanalyzed data
+    # If today=True, load only live Lyse data
+    if hdf_config.get('today', True):
+        try:
+            import lyse
+            logger.info("Loading live Lyse data (today=True)...")
+            lyse_df = lyse.data()
+            if lyse_df is not None and len(lyse_df) > 0:
+                logger.info(f"✓ Loaded {len(lyse_df)} shots from live Lyse data")
+                return lyse_df
+            else:
+                logger.warning("Live Lyse data is empty or None")
+                return None
+        except Exception as e:
+            logger.error(f"Could not load live Lyse data: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    # If today=False, load HDF files from the specified day folder
     reanalyzed = hdf_config.get('reanalyzed', False)
     
     # Determine root directory
@@ -66,19 +88,18 @@ def get_day_data(hdf_config, hdf_root=None):
             username = getpass.getuser()
             hdf_root = f"/home/{username}/NAS542_dataBEC2"
     
-    if hdf_config.get('today', True):
-        date = datetime.now().date()
-    else:
-        year = hdf_config.get('year', 2026)
-        month = hdf_config.get('month', 4)
-        day = hdf_config.get('day', 16)
-        date = datetime(year, month, day).date()
+    year = hdf_config.get('year', 2026)
+    month = hdf_config.get('month', 4)
+    day = hdf_config.get('day', 16)
+    date = datetime(year, month, day).date()
     
     # Format date as YYYY/MM/DD
     year_str = date.strftime('%Y')
     month_str = date.strftime('%m')
     day_str = date.strftime('%d')
     hdf_dir = os.path.join(hdf_root, year_str, month_str, day_str)
+    
+    logger.info(f"Loading HDF files from {hdf_dir} (today=False)...")
     
     if not os.path.isdir(hdf_dir):
         logger.warning(f"HDF directory not found: {hdf_dir}")
@@ -95,24 +116,22 @@ def get_day_data(hdf_config, hdf_root=None):
         return None
     
     source = "reanalyzed" if reanalyzed else "NAS"
-    logger.info(f"Found {len(hdf_files)} HDF5 result files in {hdf_dir} ({source})")
+    logger.info(f"Found {len(hdf_files)} HDF5 result files ({source})")
     
     # Load all DataFrames
     dfs = []
     for hdf_file in hdf_files:
         try:
-            logger.info(f"Loading: {Path(hdf_file).name}")
-            # Get the first (and usually only) table in the HDF file
-            keys = pd.read_hdf(hdf_file, mode='r').index.names
+            logger.info(f"  Loading: {Path(hdf_file).name}")
             df = pd.read_hdf(hdf_file)
-            logger.info(f"  → {len(df)} rows, {len(df.columns)} columns")
+            logger.info(f"    → {len(df)} rows, {len(df.columns)} columns")
             dfs.append(df)
         except Exception as e:
-            logger.warning(f"Could not load {Path(hdf_file).name}: {e}")
+            logger.warning(f"  Could not load {Path(hdf_file).name}: {e}")
             continue
     
     if not dfs:
-        logger.error("Could not load any result files")
+        logger.error("Could not load any HDF result files")
         return None
     
     # Concatenate all DataFrames
@@ -120,19 +139,6 @@ def get_day_data(hdf_config, hdf_root=None):
         result_df = dfs[0]
     else:
         result_df = pd.concat(dfs, sort=False)
-    
-    # If loading today's data, also include live Lyse data (which has sequence_index)
-    if hdf_config.get('today', True):
-        try:
-            import lyse
-            logger.info("Adding live Lyse data to include shots not yet saved to HDF...")
-            lyse_df = lyse.data()
-            if lyse_df is not None and len(lyse_df) > 0:
-                logger.info(f"  → Live Lyse data: {len(lyse_df)} shots")
-                result_df = pd.concat([result_df, lyse_df], sort=False)
-                logger.info(f"  → Combined: {len(result_df)} shots (before dedup)")
-        except Exception as e:
-            logger.warning(f"Could not load live Lyse data: {e}")
     
     # Remove duplicates (same shot analyzed twice)
     try:
@@ -143,7 +149,7 @@ def get_day_data(hdf_config, hdf_root=None):
             result_df = result_df[~result_df.index.duplicated(keep='last')]
         n_after = len(result_df)
         if n_after != n_before:
-            logger.info(f"Deduplicated: {n_before} → {n_after} shots")
+            logger.info(f"  Deduplicated: {n_before} → {n_after} shots")
     except Exception as e:
         logger.warning(f"Could not deduplicate: {e}")
     
