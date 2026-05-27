@@ -1409,6 +1409,13 @@ PLOT_FILES = [
         'scatter_color': 'g',
         'label': 'New',
     },
+    ,
+    {
+        'filename': 'sigmoid_center_interpolation_update_1.txt',
+        'line_style': 'g-',
+        'scatter_color': 'g',
+        'label': 'New',
+    },
     ]
 
 # Backward-compatible single-file config fallback.

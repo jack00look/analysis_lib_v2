@@ -7,7 +7,7 @@ Mode-specific configurations are loaded automatically from mode_configs/ subfold
 #test
 
 # Set this to pick which mode to run
-ACTIVE_MODE = 'ARP_Backward'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
+ACTIVE_MODE = 'KZ_det_scan'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
 # Available modes:
 #   - ARP_Forward, ARP_Forward_Feedback, ARP_Backward
 #   - KZ_det_scan, KZ_reps, KZ_defect_analysis
@@ -16,7 +16,7 @@ ACTIVE_MODE = 'ARP_Backward'  # <-- Set your active mode here. Available: 'ARP_F
 #   - bubbles, bubbles_evolution, bubbles_repeat
 
 # Optional override for sequence indices (set to None to use mode default)
-SEQS = [23]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
+SEQS = [28,29,30]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
 
 # -------------------------
 # HDF Data Configuration

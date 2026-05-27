@@ -47,4 +47,14 @@ SIGMOID_PROFILES = [
         'smoothing_sigma_density': 3.0,
         'description': 'Auto-added from waterfall',
     },
+    
+    {
+        'sigmoid_filename': 'sigmoid_center_interpolation_update_2.txt',
+        'density_filename': 'density_error_profile_update_2.txt',
+        'kp_sigmoid': 0.6,
+        'smoothing_sigma_sigmoid': 2.0,
+        'kp_density': 0.0,
+        'smoothing_sigma_density': 3.0,
+        'description': 'Auto-added from waterfall',
+    },
     ]

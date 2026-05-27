@@ -15,10 +15,6 @@ import matplotlib.pyplot as plt
 import sys
 import os
 
-# Add the waterfall_v2 directory to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from waterfall.waterfall_lib import plot_main_waterfall, _sectioned_sigmoid_analysis
 
 def test_density_profile_save():

@@ -6,7 +6,22 @@ import os
 from matplotlib.collections import PolyCollection
 from scipy.ndimage import gaussian_filter1d
 from scipy.interpolate import interp1d
-import defect_finding_lib as defect_lib
+from waterfall.defect_finding_lib import (
+    DEFAULT_DEFECT_CONFIG,
+    normalize_defect_config,
+    find_defects_in_profile,
+)
+
+# Create a module-like object for compatibility
+class DefectLib:
+    DEFAULT_DEFECT_CONFIG = DEFAULT_DEFECT_CONFIG
+    @staticmethod
+    def normalize_defect_config(cfg=None):
+        return normalize_defect_config(cfg)
+    @staticmethod
+    def find_defects_in_profile(*args, **kwargs):
+        return find_defects_in_profile(*args, **kwargs)
+defect_lib = DefectLib()
 
 
 def get_um_per_px(params, camera_name_override=None):
