@@ -22,8 +22,8 @@ cameras = camera_settings.cameras
 cam_name = 'cam_vert1'
 keys = ['PTAI_m1']#,'PTAI_m2']
 
-cam_name = 'cam_hor1'
-keys = ['atoms']
+# cam_name = 'cam_hor1'
+# keys = ['atoms']
 
 
 

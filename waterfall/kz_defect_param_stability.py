@@ -123,8 +123,7 @@ def _prepare_profiles(df, lib, mode_cfg, params):
         y_final = grouped_y
 
     x_centers_um = np.arange(M_final.shape[1]) * um_per_px
-    x_min_um = float(params['X_MIN_INTEGRATION'])
-    x_max_um = float(params['X_MAX_INTEGRATION'])
+    x_min_um, x_max_um = lib.get_integration_limits(modality_cfg, params)
     xmin_ind = int(np.argmin(np.abs(x_centers_um - x_min_um)))
     xmax_ind = int(np.argmin(np.abs(x_centers_um - x_max_um)))
     if xmax_ind < xmin_ind:

@@ -1,14 +1,14 @@
 import numpy as np
 
 # Set this to pick what to run in waterfall_FLAT_v4.py
-ACTIVE_MODE = 'ARP_Backward'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
+ACTIVE_MODE = 'KZ_det_scan'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
 # Optional override for sequence indices used by ACTIVE_MODE (set to None to use mode default)
 
 # If True, use recommended_center from the latest
 # results/kz_param_stability_safe_box_*.json.
 RECOMMENDED_CENTER = False
 #SEQS = [28]
-SEQS = [23]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
+SEQS = [42, 43, 44]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
 #EQS = [41]
 # -------------------------
 # HDF Data Configuration

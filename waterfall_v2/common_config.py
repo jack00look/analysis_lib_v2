@@ -8,12 +8,7 @@ Common waterfall_v2 configuration - Shared parameters across all modes
 PARAMS = {
     'SIGMA_Z_LOCAL_AVG': 1.,
     'SIGMA_Z_LOCAL_FLUCT': 1.,
-    # Integration window limits are in micrometers (um)
-    'X_MIN_INTEGRATION': 900,
-    'X_MAX_INTEGRATION': 1200,
     'NUM_SECTIONS': 300,
-    # Set to None for autoscale
-    'WATERFALL_MAG_CLIM': (-1., 1.),
     'WATERFALL_DENSITY_CLIM': None,
     # Domain wall velocity analysis
     'DOMAIN_WALL_X_MIN': 910,
@@ -49,14 +44,24 @@ MAGNETIZATION_MODALITIES = {
         },
         'm1_column': None,
         'm2_column': None,
+        # Integration window for vert1 (in micrometers)
+        'x_min_integration': 950,
+        'x_max_integration': 1150,
+        # Waterfall magnetization color limits (set to None for autoscale)
+        'waterfall_mag_clim': (-1.0, 1.0),
     },
     # Modality 2: PHC multiple magnetization profiles from cam_vert2_PHC
     'vert2_phc_multicomponent': {
         'camera_name': 'cam_vert2_PHC',
         'type': 'phc_profiles',
         'data_origin': 'show_ODs_v2',
-        'atoms_images': ['PHC_1', 'PHC_2', 'PHC_3', 'PHC_4'],
+        'atoms_images': ['PHC_m1_1'],
         'apply_ntot_check': False,
+        # Integration window for vert2_PHC (in micrometers)
+        'x_min_integration': 100,
+        'x_max_integration': 320,
+        # Waterfall magnetization color limits (set to None for autoscale)
+        'waterfall_mag_clim': (.7e-5, 1.3e-5),
     },
 }
 
@@ -83,13 +88,13 @@ DEFECT_ANALYSIS_PARAMS = {
 
     # 2) Peak detection on dM/dx
     'derivative_threshold': 0.0,           # Backward-compatible base magnitude
-    'derivative_threshold_pos': 0.1,       # +dM/dx threshold for positive peaks
-    'derivative_threshold_neg': -0.1,      # -dM/dx threshold for negative peaks
+    'derivative_threshold_pos': 0.01e-10,       # +dM/dx threshold for positive peaks
+    'derivative_threshold_neg': -0.01e-10,      # -dM/dx threshold for negative peaks
 
     # 3) Post-threshold peak quality filter (on magnetization step)
     'peak_step_filter_enabled': True,
     'peak_step_filter_window_px': 4,
-    'peak_step_filter_min_abs_delta_m': 0.4,
+    'peak_step_filter_min_abs_delta_m': .5,
 
     # 4) Geometric cleanup and correction
     'min_same_sign_peak_distance_um': 10.0,

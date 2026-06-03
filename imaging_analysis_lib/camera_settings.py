@@ -10,7 +10,7 @@ cameras = {
         'chi_sat': 4.7e7, # updated 2026 Feb 03
         'pulse_time': 5e-6,
         'roi_back': np.s_[120:,-400:],
-        'roi_integration': np.s_[25:100,:],
+        'roi_integration': np.s_[:,:],
         'atoms_images': ['PTAI_m2', 'PTAI_m1','PTAI_0','PTAI_p1'],
         'probe_image': 'PTAI_probe',
         'background_image': 'PTAI_back',
@@ -30,7 +30,7 @@ cameras = {
         'chi_sat': 215e6,
         'pulse_time': 5e-6,
         'roi_back': np.s_[:,300:500],
-        'roi_integration': np.s_[17:27,900:1350],
+        'roi_integration': np.s_[20:27,:],
         'atoms_images': ['PHC_1', 'PHC_2' ,'PHC_3','PHC_4','PHC_m1_1'],
         'probe_image': 'PHC_probe',
         'background_image': 'PHC_back',

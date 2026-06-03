@@ -15,7 +15,7 @@ sys.path.insert(0, '/home/rick/labscript-suite/userlib/analysislib/analysislib_v
 ACTIVE_MODE = 'bubbles_evolution'  # <-- Set your active mode here
 
 # Optional override for sequence indices used by ACTIVE_MODE (set to None to use mode default)
-SEQS = [40]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
+SEQS = [15,16,17,18,19,20,21]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
 
 # -------------------------
 # HDF Data Configuration

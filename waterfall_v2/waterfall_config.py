@@ -7,24 +7,25 @@ Mode-specific configurations are loaded automatically from mode_configs/ subfold
 #test
 
 # Set this to pick which mode to run
-ACTIVE_MODE = 'KZ_det_scan'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
+ACTIVE_MODE = 'KZ_det_scan_PHC'  # <-- Set your active mode here. Available: 'ARP_Forward', 'ARP_Forward_Feedback', 'ARP_Backward', 'KZ_det_scan', 'KZ_det_scan_PHC', 'KZ_reps', 'ARPF_reps', 'DMD_density_feedback', 'bubbles', 'bubbles_evolution', 'bubbles_repeat'
 # Available modes:
 #   - ARP_Forward, ARP_Forward_Feedback, ARP_Backward
-#   - KZ_det_scan, KZ_reps, KZ_defect_analysis
+#   - KZ_det_scan, KZ_det_scan_PHC, KZ_reps, KZ_defect_analysis
 #   - ARPF_reps
 #   - DMD_density_feedback
 #   - bubbles, bubbles_evolution, bubbles_repeat
 
 # Optional override for sequence indices (set to None to use mode default)
-SEQS = [28,29,30]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
+SEQS=[15,16,17,18,19,20,21]
+#SEQS = [15,16,17,18,19,20,21]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
 
 # -------------------------
 # HDF Data Configuration
 # -------------------------
 HDF_CONFIG = {
-    'today': True,  # Set to False to load HDF from a previous day
+    'today': False,  # Set to False to load HDF from a previous day
     'year': 2026,
     'month': 5,
-    'day': 25,
+    'day': 28,
     'reanalyzed': False,  # Load from data_reanalyzed/ instead of NAS
 }

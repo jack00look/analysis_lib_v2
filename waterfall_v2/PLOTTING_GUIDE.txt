@@ -1,0 +1,30 @@
+"""
+Quick start guide for plotting window analysis results.
+
+Usage:
+    python plot_window_analysis.py
+
+This will:
+1. Load results from ./results/window_analysis/window_analysis.json
+2. Compute defect density (defects/μm)
+3. Create two plots:
+   - Twin-axis plot: defect density vs field_at_zero_mag
+   - Detailed 3-subplot plot: defect density, field, and domain count
+4. Save plots to ./results/window_analysis/
+
+Output files:
+- window_analysis_twin_axis.png: Defect density and field on same plot
+- window_analysis_detailed.png: 3 separate panels for detailed analysis
+
+The plots show how:
+- Defect density varies across the spatial domain (left y-axis, blue)
+- Field at zero magnetization varies across position (right y-axis, red)
+- Domain counts at the zero-magnetization field (bottom panel)
+
+This helps identify:
+- Spatial variations in defect structure
+- Whether the field for domain balance varies with position
+- How many domains form at the magnetization zero point
+"""
+
+print(__doc__)

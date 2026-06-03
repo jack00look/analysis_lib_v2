@@ -49,6 +49,11 @@ from waterfall_v2.common_config import PARAMS
 def main():
     """
     Main waterfall analysis function.
+    
+    For KZ_det_scan_window mode, also performs:
+    1. Domain extraction
+    2. Sliding window analysis
+    3. Result plotting
     """
     logger.info(f"\n{'='*80}")
     logger.info(f"WATERFALL V2 - MULTISHOT ANALYSIS")
@@ -145,6 +150,131 @@ def main():
         import traceback
         traceback.print_exc()
         return None
+    
+    # KZ_det_scan_window specific analysis
+    if ACTIVE_MODE == 'KZ_det_scan_window':
+        logger.info(f"\n{'='*80}")
+        logger.info("KZ_det_scan_window EXTENDED ANALYSIS")
+        logger.info(f"{'='*80}\n")
+        
+        try:
+            # Import domain and window analysis modules
+            from waterfall.domain_extraction_lib import create_domain_info_per_shot
+            from waterfall.window_analysis_lib import (
+                sliding_window_analysis,
+                save_window_analysis_results,
+                save_window_analysis_csv,
+                results_to_dataframe
+            )
+            from plot_domains_validation import plot_domains_validation
+            
+            # Step 1: Extract domain information
+            logger.info("Step 1: Extracting domain information for all shots...")
+            domain_info_dict = create_domain_info_per_shot(
+                df,
+                seqs=seqs_to_load,
+                scan='KZ_det_scan_window',
+                data_origin='show_ODs_v2',
+                mode_cfg=MODE_CONFIG,
+                params=PARAMS
+            )
+            
+            if domain_info_dict:
+                logger.info(f"✓ Extracted domain info for {len(domain_info_dict)} shots\n")                
+                # Plot domain validation FIRST - before any further analysis
+                logger.info("\nStep 1b: Creating domain validation plot...")
+                try:
+                    output_dir = './results/window_analysis'
+                    fig_val = plot_domains_validation(
+                        df, domain_info_dict, PARAMS, MODE_CONFIG,
+                        output_dir=output_dir,
+                        figname='domains_validation.png'
+                    )
+                    logger.info("✓ Domain validation plot created\n")
+                    logger.info("EXAMINE THE DOMAIN VALIDATION PLOT TO VERIFY DOMAIN DETECTION\n")
+                except Exception as e:
+                    logger.warning(f"Could not create domain validation plot: {e}\n")
+            else:
+                logger.warning("No domain info extracted, skipping window analysis.\n")
+                return df
+            
+            # Step 2: Perform sliding window analysis
+            logger.info("Step 2: Performing sliding window analysis...")
+            window_size_um = float(MODE_CONFIG.get('window_size', 80.0))
+            window_step_um = float(MODE_CONFIG.get('window_step', 5.0))
+            x_min_um = float(PARAMS.get('X_MIN_INTEGRATION', 920.0))
+            x_max_um = float(PARAMS.get('X_MAX_INTEGRATION', 1180.0))
+            
+            logger.info(f"  Window: size={window_size_um:.1f} μm, step={window_step_um:.1f} μm")
+            logger.info(f"  Range: [{x_min_um:.1f}, {x_max_um:.1f}] μm\n")
+            
+            results = sliding_window_analysis(
+                df,
+                x_min_um=x_min_um,
+                x_max_um=x_max_um,
+                window_size_um=window_size_um,
+                window_step_um=window_step_um,
+                mode_cfg=MODE_CONFIG,
+                params=PARAMS,
+                domain_info_dict=domain_info_dict
+            )
+            
+            if results:
+                logger.info(f"\n✓ Analyzed {len(results)} windows\n")
+            else:
+                logger.warning("No valid windows analyzed.\n")
+                return df
+            
+            # Step 3: Save results
+            logger.info("Step 3: Saving analysis results...")
+            output_dir = './results/window_analysis'
+            save_window_analysis_results(results, output_dir=output_dir)
+            save_window_analysis_csv(results, output_dir=output_dir)
+            
+            # Step 4: Create plots
+            logger.info("\nStep 4: Creating result plots...")
+            try:
+                from plot_window_analysis import plot_window_analysis, plot_window_analysis_with_domains, plot_raw_magnetization_by_field
+                
+                fig1, _ = plot_window_analysis(results, window_size_um, 
+                                              output_dir=output_dir,
+                                              figname='window_analysis_twin_axis.png')
+                
+                fig2, _ = plot_window_analysis_with_domains(results, window_size_um,
+                                                           output_dir=output_dir,
+                                                           figname='window_analysis_detailed.png')
+                
+                # Plot raw magnetization grouped by field
+                # Build field_summary from results
+                field_summary = {}
+                for result in results:
+                    for field_val_str, field_data in result['field_summary'].items():
+                        try:
+                            field_val = float(field_val_str)
+                            if field_val not in field_summary:
+                                field_summary[field_val] = field_data
+                        except (ValueError, TypeError):
+                            continue
+                
+                if field_summary:
+                    fig3 = plot_raw_magnetization_by_field(df, field_summary, domain_info_dict, PARAMS,
+                                                          output_dir=output_dir,
+                                                          figname='raw_magnetization_by_field.png')
+                
+                logger.info("✓ Plots created successfully!\n")
+                
+            except Exception as e:
+                logger.warning(f"Could not create plots: {e}\n")
+            
+            logger.info(f"\n{'='*80}")
+            logger.info("KZ_det_scan_window ANALYSIS COMPLETE")
+            logger.info(f"Results saved to: {output_dir}/")
+            logger.info(f"{'='*80}\n")
+            
+        except Exception as e:
+            logger.error(f"Error in KZ_det_scan_window analysis: {e}")
+            import traceback
+            traceback.print_exc()
     
     logger.info(f"\n{'='*80}")
     logger.info("Ready for further analysis (e.g., waterfall plots, fitting, etc.)")

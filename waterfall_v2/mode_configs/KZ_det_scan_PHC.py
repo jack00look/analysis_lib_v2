@@ -1,0 +1,39 @@
+"""Configuration for KZ_det_scan_PHC mode - Phase contrast imaging variant of KZ_det_scan"""
+
+MODE_CONFIG = {
+    'scan': 'KZ_det_scan',
+    'data_origin': 'show_ODs_v2',
+    'magnetization_modality': 'vert2_phc_multicomponent',
+    'constraints': None,
+    'average': False,
+    'plots': {
+        'main_waterfall': True,
+        'fluctuations_waterfall': False,
+        'sectioned_sigmoid': False,
+        'avg_density_profile': False,
+        'avg_magnetization_profile': False,
+        'corr_sigmoid_density': False,
+        'corr_mag_density': False,
+        'evolution_plots': False,
+        'used_region_density_fluctuations': False,
+        'all_shots_waterfall': False,
+        'derivative_waterfall': True,
+    },
+    'globals_in_title': [],
+    'domain_balance_fit_window': 0.4,
+    
+    # Defect analysis configuration
+    'defect_analysis': {
+        'gaussian_sigma': 1.5,
+        'derivative_threshold': 0.0,
+        'derivative_threshold_pos': 3e-7,
+        'derivative_threshold_neg': -3e-7,
+        'threshold_scan': False,
+        'zero_crossing_min_distance_um': 7.0,
+        'peak_step_filter_enabled': True,
+        'peak_step_filter_window_px': 3,
+        'peak_step_filter_min_abs_delta_m': .1e-5,
+        'min_same_sign_peak_distance_um': 6.0,
+        'missed_defect_correction_method': 'opposite_peak',
+    },
+}

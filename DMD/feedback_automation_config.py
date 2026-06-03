@@ -21,7 +21,7 @@ H5_SHOT_ITERATION = 0
 yieldH5_SHOT_REPETITION = 0
 
 # Option 2: Load from a txt file (set USE_H5_PROFILE to False)
-PROFILE_TXT_FILE = 'dmd_profile_20260527_112228.txt'  # Relative to DMD folder or absolute path
+PROFILE_TXT_FILE = 'dmd_profile_20260528_095820.txt'  # Relative to DMD folder or absolute path
 
 # =============================================================================
 # NEW SIGMOID PROFILE LOCATION

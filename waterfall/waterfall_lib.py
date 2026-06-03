@@ -47,6 +47,38 @@ def get_um_per_px(params, camera_name_override=None):
         return default_um_per_px
 
 
+def get_integration_limits(modality_cfg, params):
+    """Get x_min and x_max integration limits from modality config, with fallback to params."""
+    x_min = None
+    x_max = None
+    
+    if isinstance(modality_cfg, dict):
+        x_min = modality_cfg.get('x_min_integration', None)
+        x_max = modality_cfg.get('x_max_integration', None)
+    
+    # Fallback to global params
+    if x_min is None:
+        x_min = params.get('X_MIN_INTEGRATION', 900)
+    if x_max is None:
+        x_max = params.get('X_MAX_INTEGRATION', 1200)
+    
+    return float(x_min), float(x_max)
+
+
+def get_waterfall_mag_clim(modality_cfg, params):
+    """Get waterfall magnetization color limits from modality config, with fallback to params."""
+    clim = None
+    
+    if isinstance(modality_cfg, dict):
+        clim = modality_cfg.get('waterfall_mag_clim', None)
+    
+    # Fallback to global params
+    if clim is None:
+        clim = params.get('WATERFALL_MAG_CLIM', None)
+    
+    return clim
+
+
 def get_scan_config(scan_type):
     if scan_type == 'ARP_Forward':
         return 'ARPF_final_set_field', 'ARP Forward'
@@ -882,8 +914,7 @@ def plot_fluctuations_waterfall(sigma2_map, y_vals, dy, y_axis_label, title, par
     coll = PolyCollection(polys, array=np.array(colors), cmap='magma')
     ax.add_collection(coll)
 
-    x_min_um = params['X_MIN_INTEGRATION']
-    x_max_um = params['X_MAX_INTEGRATION']
+    x_min_um, x_max_um = get_integration_limits(modality_cfg, params)
 
     # Auto color scale from max fluctuation in the analysis region
     # (same x-window used in the main analysis).
@@ -1093,8 +1124,8 @@ def plot_used_region_density_fluctuations(D, y_unique, dy, y_axis_label, title, 
     Parameters:
         mode_cfg: Optional dict with 'density_fluct_y_label' to override y-axis label
     """
-    x_min_um = params['X_MIN_INTEGRATION']
-    x_max_um = params['X_MAX_INTEGRATION']
+    modality_cfg = _resolve_modality(mode_cfg if isinstance(mode_cfg, dict) else {}, params)
+    x_min_um, x_max_um = get_integration_limits(modality_cfg, params)
     x_centers_um = np.arange(D.shape[1]) * um_per_px
     xmin_ind = int(np.argmin(np.abs(x_centers_um - x_min_um)))
     xmax_ind = int(np.argmin(np.abs(x_centers_um - x_max_um)))
@@ -1223,6 +1254,7 @@ def plot_main_waterfall(
     plot_flags,
     um_per_px,
     average=False,
+    modality_cfg=None,
     defect_points=None,
     defect_points_pos=None,
     defect_points_neg=None,
@@ -1265,8 +1297,9 @@ def plot_main_waterfall(
             colors_M.append(M[i, j])
 
     collection_M = PolyCollection(polys_M, array=np.array(colors_M), cmap='RdBu')
-    if params['WATERFALL_MAG_CLIM'] is not None:
-        collection_M.set_clim(*params['WATERFALL_MAG_CLIM'])
+    mag_clim = get_waterfall_mag_clim(modality_cfg, params)
+    if mag_clim is not None:
+        collection_M.set_clim(*mag_clim)
     ax_m.add_collection(collection_M)
     mag_vmin, mag_vmax = collection_M.get_clim()
 
@@ -1287,8 +1320,7 @@ def plot_main_waterfall(
     ax_d.add_collection(collection_D)
     ax_d.sharex(ax_m)
 
-    x_min_um = params['X_MIN_INTEGRATION']
-    x_max_um = params['X_MAX_INTEGRATION']
+    x_min_um, x_max_um = get_integration_limits(modality_cfg, params)
     x_centers_um = np.arange(M.shape[1]) * um_per_px
     xmin_ind = np.argmin(np.abs(x_centers_um - x_min_um))
     xmax_ind = np.argmin(np.abs(x_centers_um - x_max_um))
@@ -1915,8 +1947,8 @@ def plot_evolution_analysis(y_plot, y_axis_label, z_local_fluctuations, M, um_pe
         params = {}
     if mode_cfg is None:
         mode_cfg = {}
-    x_min_um = params.get('X_MIN_INTEGRATION', 900)
-    x_max_um = params.get('X_MAX_INTEGRATION', 1200)
+    modality_cfg = _resolve_modality(mode_cfg if isinstance(mode_cfg, dict) else {}, params)
+    x_min_um, x_max_um = get_integration_limits(modality_cfg, params)
     
     fig_fluct, ax_fluct = plt.subplots()
     z_fluc_smooth = gaussian_filter1d(z_local_fluctuations, sigma=2, axis=0)
@@ -2197,8 +2229,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         zero_crossing_min_distance_um = float(defect_cfg['zero_crossing_min_distance_um'])
 
         x_centers_um = np.arange(M_final.shape[1]) * um_per_px
-        x_min_um = float(params['X_MIN_INTEGRATION'])
-        x_max_um = float(params['X_MAX_INTEGRATION'])
+        x_min_um, x_max_um = get_integration_limits(modality_cfg, params)
 
         defect_x, defect_y = [], []
         defect_x_pos, defect_y_pos = [], []
@@ -2372,7 +2403,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         min_same_sign_peak_distance_um_det = 4.0
         missed_defect_correction_method_det = 'opposite_peak'
         try:
-            from waterfall_config import DEFECT_ANALYSIS_PARAMS as _wf_defect_cfg
+            from waterfall_v2.common_config import DEFECT_ANALYSIS_PARAMS as _wf_defect_cfg
             kz_ref_cfg = dict(_wf_defect_cfg) if isinstance(_wf_defect_cfg, dict) else {}
             det_cfg_override = {}
             if isinstance(mode_cfg, dict):
@@ -2404,8 +2435,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             missed_defect_correction_method_det = 'opposite_peak'
 
         x_centers_um_det = np.arange(M_full.shape[1]) * um_per_px
-        x_min_um_det = float(params['X_MIN_INTEGRATION'])
-        x_max_um_det = float(params['X_MAX_INTEGRATION'])
+        x_min_um_det, x_max_um_det = get_integration_limits(modality_cfg, params)
         xmin_det = int(np.argmin(np.abs(x_centers_um_det - x_min_um_det)))
         xmax_det = int(np.argmin(np.abs(x_centers_um_det - x_max_um_det)))
         if xmax_det < xmin_det:
@@ -2717,6 +2747,11 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             events.sort(key=lambda e: e[0])
 
             corrected_x = []
+            pos_indices_to_delete = set()
+            neg_indices_to_delete = set()
+            pos_midpoints = []
+            neg_midpoints = []
+
             j = 0
             while j < len(events):
                 sign_j = events[j][1]
@@ -2725,17 +2760,19 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                     k += 1
                 run = events[j:k]
                 if len(run) >= 2:
-                    candidates = []
-                    # Search ONLY between adjacent same-sign peaks in the run.
-                    for p in range(len(run) - 1):
-                        i_start = int(run[p][0])
-                        i_end = int(run[p + 1][0])
-                        sign_pair = run[p][1]
+                    ii = 0
+                    while ii < len(run) - 1:
+                        i_start = int(run[ii][0])
+                        i_end = int(run[ii + 1][0])
+                        sign_pair = run[ii][1]
+                        found = False
+                        ox = None
                         if missed_defect_correction_method_det in ('zero_crossing', 'both'):
                             zx = _find_zero_crossing_x_det(m_roi, x_roi_um_det, i_start, i_end)
                             if zx is not None:
-                                candidates.append(float(zx))
-                        if missed_defect_correction_method_det in ('opposite_peak', 'both'):
+                                ox = zx
+                                found = True
+                        if not found and missed_defect_correction_method_det in ('opposite_peak', 'both'):
                             ox = _find_opposite_peak_x_det(
                                 d_roi,
                                 x_roi_um_det,
@@ -2744,19 +2781,57 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                                 i_end,
                             )
                             if ox is not None:
-                                candidates.append(float(ox))
+                                found = True
 
-                    for cx in candidates:
-                        if peak_x.size == 0:
-                            corrected_x.append(float(cx))
-                            continue
-                        min_dist = float(np.min(np.abs(peak_x - float(cx))))
-                        if min_dist >= zero_cross_min_dist_um_det:
-                            corrected_x.append(float(cx))
+                        if found and ox is not None:
+                            if peak_x.size == 0:
+                                corrected_x.append(float(ox))
+                            else:
+                                min_dist = float(np.min(np.abs(peak_x - float(ox))))
+                                if min_dist >= zero_cross_min_dist_um_det:
+                                    corrected_x.append(float(ox))
+                            ii += 1
+                        else:
+                            # No acceptable opposite-sign extremum: collapse pair to midpoint.
+                            xa = float(x_roi_um_det[i_start])
+                            xb = float(x_roi_um_det[i_end])
+                            x_mid = 0.5 * (xa + xb)
+                            if sign_pair == 'pos':
+                                pos_indices_to_delete.add(i_start)
+                                pos_indices_to_delete.add(i_end)
+                                pos_midpoints.append(x_mid)
+                            else:
+                                neg_indices_to_delete.add(i_start)
+                                neg_indices_to_delete.add(i_end)
+                                neg_midpoints.append(x_mid)
+                            ii += 2
                 j = k
 
             if len(corrected_x) > 1:
                 corrected_x = list(np.unique(np.round(np.asarray(corrected_x, dtype=float), 6)))
+
+            # Rebuild pos_x / neg_x after midpoint collapse.
+            if pos_indices_to_delete or pos_midpoints:
+                keep_pos = np.asarray(
+                    [float(x) for idx, x in zip(pos_idx.tolist(), pos_x.tolist())
+                     if int(idx) not in pos_indices_to_delete],
+                    dtype=float,
+                )
+                pos_x = (
+                    np.concatenate([keep_pos, np.asarray(pos_midpoints, dtype=float)])
+                    if pos_midpoints else keep_pos
+                )
+            if neg_indices_to_delete or neg_midpoints:
+                keep_neg = np.asarray(
+                    [float(x) for idx, x in zip(neg_idx.tolist(), neg_x.tolist())
+                     if int(idx) not in neg_indices_to_delete],
+                    dtype=float,
+                )
+                neg_x = (
+                    np.concatenate([keep_neg, np.asarray(neg_midpoints, dtype=float)])
+                    if neg_midpoints else keep_neg
+                )
+
 
             # Domain-balance metric per shot:
             # (total positive-domain size - total negative-domain size) / used-region size
@@ -3069,8 +3144,9 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                 pass
             fig_raw.subplots_adjust(left=0.09, right=0.84, bottom=0.10, top=0.92)
             cax_raw = fig_raw.add_axes([0.90, 0.10, 0.018, 0.82])
-            raw_vmin = -1.0 if params.get('WATERFALL_MAG_CLIM') is None else params['WATERFALL_MAG_CLIM'][0]
-            raw_vmax = 1.0 if params.get('WATERFALL_MAG_CLIM') is None else params['WATERFALL_MAG_CLIM'][1]
+            mag_clim = get_waterfall_mag_clim(modality_cfg, params)
+            raw_vmin = -1.0 if mag_clim is None else mag_clim[0]
+            raw_vmax = 1.0 if mag_clim is None else mag_clim[1]
             im_raw = ax_raw.imshow(
                 M_full,
                 aspect='auto',
@@ -3297,12 +3373,12 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             pass
         fig_raw.subplots_adjust(left=0.09, right=0.84, bottom=0.10, top=0.92)
         cax_raw = fig_raw.add_axes([0.90, 0.10, 0.018, 0.82])
-        raw_vmin = -1.0 if params.get('WATERFALL_MAG_CLIM') is None else params['WATERFALL_MAG_CLIM'][0]
-        raw_vmax = 1.0 if params.get('WATERFALL_MAG_CLIM') is None else params['WATERFALL_MAG_CLIM'][1]
+        mag_clim = get_waterfall_mag_clim(modality_cfg, params)
+        raw_vmin = -1.0 if mag_clim is None else mag_clim[0]
+        raw_vmax = 1.0 if mag_clim is None else mag_clim[1]
         
         x_centers_um_bub = np.arange(M_full.shape[1]) * um_per_px
-        x_min_um_bub = float(params['X_MIN_INTEGRATION'])
-        x_max_um_bub = float(params['X_MAX_INTEGRATION'])
+        x_min_um_bub, x_max_um_bub = get_integration_limits(modality_cfg, params)
         
         # Detect domain walls for each shot
         gaussian_sigma_um = 3.0
@@ -3654,6 +3730,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             plot_flags,
             um_per_px,
             average=average,
+            modality_cfg=modality_cfg,
             defect_points=defect_points,
             defect_points_pos=defect_points_pos,
             defect_points_neg=defect_points_neg,
@@ -3698,8 +3775,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             D_min_mag = np.zeros((len(grouped_indices), img_dims))
             z_fluc_min_mag = np.zeros((len(grouped_indices), z_fluc_full.shape[1]))
             
-            x_min_um = float(params['X_MIN_INTEGRATION'])
-            x_max_um = float(params['X_MAX_INTEGRATION'])
+            x_min_um, x_max_um = get_integration_limits(modality_cfg, params)
             x_centers_um = np.arange(img_dims) * um_per_px
             xmin_ind = int(np.argmin(np.abs(x_centers_um - x_min_um)))
             xmax_ind = int(np.argmin(np.abs(x_centers_um - x_max_um)))
@@ -3728,6 +3804,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                 plot_flags,
                 um_per_px,
                 average=False,  # Already selected, not averaged
+                modality_cfg=modality_cfg,
                 dw_fit_coeffs=dw_fit_coeffs,
                 dw_fit_x=dw_fit_x,
                 dw_fit_t=dw_fit_t,
@@ -3748,6 +3825,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             plot_flags,
             um_per_px,
             average=average,
+            modality_cfg=modality_cfg,
             defect_points=None,
             defect_points_pos=None,
             defect_points_neg=None,
@@ -3810,8 +3888,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                 M_avg = np.mean(M_final, axis=0)
                 
                 # Find sigmoid centers if we have sectioned analysis
-                x_min_um = params.get('X_MIN_INTEGRATION', np.min(x_plot_um))
-                x_max_um = params.get('X_MAX_INTEGRATION', np.max(x_plot_um))
+                x_min_um, x_max_um = get_integration_limits(modality_cfg, params)
                 x_centers_um = x_plot_um
                 xmin_ind = np.argmin(np.abs(x_centers_um - x_min_um))
                 xmax_ind = np.argmin(np.abs(x_centers_um - x_max_um))

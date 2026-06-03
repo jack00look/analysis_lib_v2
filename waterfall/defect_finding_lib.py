@@ -274,6 +274,12 @@ def find_defects_in_profile(m_profile, x_axis_um, defect_cfg, x_min_um, x_max_um
 	events.sort(key=lambda e: e[0])
 
 	corrected_x = []
+	# Track which peaks are replaced by midpoints due to missing opposite-sign extremum.
+	pos_indices_to_delete = set()
+	neg_indices_to_delete = set()
+	pos_midpoints = []  # x positions (μm) of midpoint replacements for positive peaks
+	neg_midpoints = []  # x positions (μm) of midpoint replacements for negative peaks
+
 	j = 0
 	while j < len(events):
 		sign_j = events[j][1]
@@ -283,35 +289,78 @@ def find_defects_in_profile(m_profile, x_axis_um, defect_cfg, x_min_um, x_max_um
 		run = events[j:k]
 
 		if len(run) >= 2:
-			candidates = []
-			for p in range(len(run) - 1):
-				i_start = int(run[p][0])
-				i_end = int(run[p + 1][0])
-				sign_pair = run[p][1]
+			i = 0
+			while i < len(run) - 1:
+				i_start = int(run[i][0])
+				i_end = int(run[i + 1][0])
+				sign_pair = run[i][1]
 				ox = _find_opposite_peak_x(d_roi, x_roi_um, sign_pair, i_start, i_end)
 				if ox is not None:
-					candidates.append(float(ox))
-
-			for cx in candidates:
-				if peak_thr_x.size == 0:
-					corrected_x.append(float(cx))
-					continue
-				min_dist = float(np.min(np.abs(peak_thr_x - float(cx))))
-				if min_dist >= cfg['zero_crossing_min_distance_um']:
-					corrected_x.append(float(cx))
+					# Acceptable opposite-sign extremum found: record as corrected defect.
+					if peak_thr_x.size == 0:
+						corrected_x.append(float(ox))
+					else:
+						min_dist = float(np.min(np.abs(peak_thr_x - float(ox))))
+						if min_dist >= cfg['zero_crossing_min_distance_um']:
+							corrected_x.append(float(ox))
+					i += 1
+				else:
+					# No acceptable opposite-sign extremum between consecutive same-sign
+					# peaks: physically impossible configuration. Delete both and insert
+					# a single same-sign defect at their midpoint.
+					xa = float(x_roi_um[i_start])
+					xb = float(x_roi_um[i_end])
+					x_mid = 0.5 * (xa + xb)
+					if sign_pair == 'pos':
+						pos_indices_to_delete.add(i_start)
+						pos_indices_to_delete.add(i_end)
+						pos_midpoints.append(x_mid)
+					else:
+						neg_indices_to_delete.add(i_start)
+						neg_indices_to_delete.add(i_end)
+						neg_midpoints.append(x_mid)
+					i += 2  # Both consumed; remaining run tail handled by next iterations.
 		j = k
+
+	# Apply deletions and midpoint insertions to positive peaks.
+	if pos_indices_to_delete or pos_midpoints:
+		keep_pos_x = np.asarray(
+			[float(x) for idx, x in zip(peak_pos_roi.tolist(), peak_pos_x.tolist())
+			 if int(idx) not in pos_indices_to_delete],
+			dtype=float,
+		)
+		peak_pos_x_final = (
+			np.concatenate([keep_pos_x, np.asarray(pos_midpoints, dtype=float)])
+			if pos_midpoints else keep_pos_x
+		)
+	else:
+		peak_pos_x_final = peak_pos_x
+
+	# Apply deletions and midpoint insertions to negative peaks.
+	if neg_indices_to_delete or neg_midpoints:
+		keep_neg_x = np.asarray(
+			[float(x) for idx, x in zip(peak_neg_roi.tolist(), peak_neg_x.tolist())
+			 if int(idx) not in neg_indices_to_delete],
+			dtype=float,
+		)
+		peak_neg_x_final = (
+			np.concatenate([keep_neg_x, np.asarray(neg_midpoints, dtype=float)])
+			if neg_midpoints else keep_neg_x
+		)
+	else:
+		peak_neg_x_final = peak_neg_x
 
 	if len(corrected_x) > 1:
 		corrected_x = list(np.unique(np.round(np.asarray(corrected_x, dtype=float), 6)))
 
-	threshold_x_all = np.concatenate([peak_pos_x, peak_neg_x]).astype(float)
+	threshold_x_all = np.concatenate([peak_pos_x_final, peak_neg_x_final]).astype(float)
 	rejected_x = np.asarray([float(x_roi_um[int(idxr)]) for idxr in rejected_idx], dtype=float)
 	corrected_x = np.asarray(corrected_x, dtype=float)
 
 	return {
 		'threshold_x_all': threshold_x_all,
-		'threshold_x_pos': np.asarray(peak_pos_x, dtype=float),
-		'threshold_x_neg': np.asarray(peak_neg_x, dtype=float),
+		'threshold_x_pos': peak_pos_x_final,
+		'threshold_x_neg': peak_neg_x_final,
 		'corrected_x': corrected_x,
 		'rejected_x': rejected_x,
 		'd_roi': np.asarray(d_roi, dtype=float),
