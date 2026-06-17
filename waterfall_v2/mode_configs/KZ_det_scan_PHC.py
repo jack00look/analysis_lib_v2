@@ -24,13 +24,13 @@ MODE_CONFIG = {
     
     # Defect analysis configuration
     'defect_analysis': {
-        'gaussian_sigma': 1.5,
-        'derivative_threshold': 0.0,
-        'derivative_threshold_pos': 3e-7,
-        'derivative_threshold_neg': -3e-7,
+        'gaussian_sigma': 2.,
+        'derivative_threshold': 0.4e-6,           # Backward-compatible base magnitude
+        'derivative_threshold_pos': 0.4e-6,
+        'derivative_threshold_neg': -0.4e-6,
         'threshold_scan': False,
-        'zero_crossing_min_distance_um': 7.0,
-        'peak_step_filter_enabled': True,
+        'zero_crossing_min_distance_um': 2.0,
+        'peak_step_filter_enabled': False,
         'peak_step_filter_window_px': 3,
         'peak_step_filter_min_abs_delta_m': .1e-5,
         'min_same_sign_peak_distance_um': 6.0,

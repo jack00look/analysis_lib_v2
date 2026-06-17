@@ -15,6 +15,41 @@ from datetime import datetime
 from scipy.ndimage import gaussian_filter1d
 
 
+def find_field_column(df):
+    """Return the ARPKZ final-field column in tuple-style or flat lyse DataFrames."""
+    for col in df.columns:
+        if (
+            (isinstance(col, tuple) and 'ARPKZ_final_set_field' in str(col[0]))
+            or col == 'ARPKZ_final_set_field'
+        ):
+            return col
+    return None
+
+
+def get_magnetization_matrix(df, mode_cfg, params, data_origin=None):
+    """
+    Build the same normalized magnetization matrix used by waterfall_lib.
+
+    This avoids treating a single density profile, such as PTAI_m1_n1D_x, as
+    magnetization in the window/domain helper scripts.
+    """
+    if data_origin is None:
+        data_origin = mode_cfg.get('data_origin', 'show_ODs_v2') if isinstance(mode_cfg, dict) else 'show_ODs_v2'
+
+    try:
+        from waterfall.waterfall_lib import build_magnetization_inputs, get_um_per_px
+
+        profile_inputs = build_magnetization_inputs(df, mode_cfg if isinstance(mode_cfg, dict) else {}, params, data_origin)
+        if profile_inputs is None:
+            return None, None
+        modality_cfg = profile_inputs.get('modality_cfg', {})
+        um_per_px = get_um_per_px(params, camera_name_override=modality_cfg.get('camera_name'))
+        return np.asarray(profile_inputs['M_full'], dtype=float), float(um_per_px)
+    except Exception as err:
+        print(f"[Domain Extraction] Warning: could not build normalized magnetization ({err})")
+        return None, None
+
+
 def extract_domain_boundaries_and_signs(m_profile, x_axis_um, x_min_um, x_max_um, 
                                         gaussian_sigma=0.3, pos_threshold=0.08, 
                                         neg_threshold=-0.08):
@@ -180,46 +215,25 @@ def create_domain_info_per_shot(df, seqs, scan, data_origin, mode_cfg, params):
     x_max_um = float(params.get('DOMAIN_WALL_X_MAX', 100))
     um_per_px = float(params.get('UM_PER_PX', 1.019))
     
-    # Find field column
-    field_col = None
-    for col in df.columns:
-        if isinstance(col, tuple) and 'ARPKZ_final_set_field' in str(col[0]):
-            field_col = col
-            break
+    field_col = find_field_column(df)
     
     if field_col is None:
         print(f"[Domain Extraction] Warning: Could not find ARPKZ_final_set_field column")
         return domain_info_dict
     
-    # Find magnetization column - same approach as KZ_det_scan
-    # Try to load PTAI_m1 magnetization profile
-    mag_col = None
-    candidates = [
-        (data_origin, 'PTAI_m1_n1D_x'),
-        (data_origin, 'PTAI_m1_SVD_n1D_x'),
-        (data_origin, 'PTAI_m1_1d'),
-    ]
-    
-    for cand in candidates:
-        if cand in df.columns:
-            mag_col = cand
-            break
-    
-    if mag_col is None:
-        print(f"[Domain Extraction] Warning: Could not find magnetization column")
-        print(f"[Domain Extraction] Tried: {candidates}")
+    M_full, um_per_px = get_magnetization_matrix(df, mode_cfg, params, data_origin=data_origin)
+    if M_full is None:
+        print(f"[Domain Extraction] Warning: Could not build magnetization matrix")
         return domain_info_dict
     
-    print(f"[Domain Extraction] Found columns: mag={mag_col}, field={field_col}")
+    print(f"[Domain Extraction] Found field={field_col}; using normalized two-component magnetization")
     
     # Iterate through shots
     for shot_idx in range(len(df)):
         try:
             field_value = float(df[field_col].iloc[shot_idx])
             
-            m_profile = df[mag_col].iloc[shot_idx]
-            if not isinstance(m_profile, np.ndarray):
-                m_profile = np.asarray(m_profile, dtype=float)
+            m_profile = np.asarray(M_full[shot_idx], dtype=float)
             
             # Create x-axis
             x_centers_um = np.arange(m_profile.size) * um_per_px

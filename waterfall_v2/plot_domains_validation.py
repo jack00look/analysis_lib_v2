@@ -15,7 +15,7 @@ from pathlib import Path
 # Add analysislib_v2 to path
 sys.path.insert(0, '/home/rick/labscript-suite/userlib/analysislib/analysislib_v2')
 
-from waterfall.domain_extraction_lib import create_domain_info_per_shot
+from waterfall.domain_extraction_lib import create_domain_info_per_shot, get_magnetization_matrix
 
 
 def plot_domains_validation(df, domain_info_dict, params, mode_cfg, 
@@ -36,26 +36,12 @@ def plot_domains_validation(df, domain_info_dict, params, mode_cfg,
         figname: filename for plot
     """
     
-    # Get magnetization column
+    # Build the same normalized magnetization used by the main waterfall plot.
     data_origin = mode_cfg.get('data_origin', 'show_ODs_v2') if isinstance(mode_cfg, dict) else 'show_ODs_v2'
-    mag_col = None
-    candidates = [
-        (data_origin, 'PTAI_m1_n1D_x'),
-        (data_origin, 'PTAI_m1_SVD_n1D_x'),
-        (data_origin, 'PTAI_m1_1d'),
-    ]
-    
-    for cand in candidates:
-        if cand in df.columns:
-            mag_col = cand
-            break
-    
-    if mag_col is None:
-        print(f"Error: Magnetization column not found. Tried: {candidates}")
+    M_full, um_per_px = get_magnetization_matrix(df, mode_cfg, params, data_origin=data_origin)
+    if M_full is None:
+        print("Error: normalized magnetization matrix could not be built.")
         return None
-    
-    # Extract and prepare data
-    um_per_px = float(params.get('UM_PER_PX', 1.019))
     
     print(f"\nPlotting raw magnetization for {len(df)} shots...")
     
@@ -66,12 +52,7 @@ def plot_domains_validation(df, domain_info_dict, params, mode_cfg,
     
     # Plot each shot
     for shot_idx in range(len(df)):
-        shot_data = df.iloc[shot_idx]
-        
-        # Get magnetization profile
-        mag_profile = shot_data[mag_col]
-        if not isinstance(mag_profile, np.ndarray):
-            mag_profile = np.asarray(mag_profile)
+        mag_profile = np.asarray(M_full[shot_idx], dtype=float)
         
         # Generate x-axis (same for all shots)
         if x_axis is None:

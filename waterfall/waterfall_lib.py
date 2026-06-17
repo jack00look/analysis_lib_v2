@@ -84,6 +84,8 @@ def get_scan_config(scan_type):
         return 'ARPF_final_set_field', 'ARP Forward'
     if scan_type == 'KZ_det_scan':
         return 'ARPKZ_final_set_field', 'KZ Detuning Scan'
+    if scan_type == 'KZ_det_scan_window':
+        return 'ARPKZ_final_set_field', 'KZ Detuning Scan Window'
     if scan_type == 'ARP_KZ_Preparation':
         return 'ARPKZ_final_set_field', 'ARP KZ Preparation'
     if scan_type == 'ARP_Backward':
@@ -342,6 +344,8 @@ def _resolve_modality(mode_cfg, params):
         modality_cfg['data_origin'] = mode_cfg.get('data_origin', 'show_ODs')
     if 'apply_ntot_check' not in modality_cfg:
         modality_cfg['apply_ntot_check'] = bool(modality_cfg.get('type', 'two_component') == 'two_component')
+    if isinstance(mode_cfg, dict) and 'apply_ntot_check' in mode_cfg:
+        modality_cfg['apply_ntot_check'] = bool(mode_cfg['apply_ntot_check'])
 
     # Auto-populate atoms_images from camera settings if not explicitly provided.
     if 'atoms_images' not in modality_cfg or not modality_cfg.get('atoms_images'):
@@ -2147,7 +2151,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
     y_raw = sorted_df[y_axis_col].values
     grouped_y, grouped_indices = _build_group_indices(y_raw)
 
-    if scan == 'KZ_det_scan':
+    if scan in ('KZ_det_scan', 'KZ_det_scan_window'):
         print('KZ_det_scan: shots used after filtering per det:')
         for det_val, idx in zip(grouped_y, grouped_indices):
             try:
@@ -2381,6 +2385,11 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         # Threshold-scan diagnostics were removed for KZ_defect_analysis.
 
     if scan == 'KZ_det_scan':
+        print(
+            "KZ_det_scan branch entered: "
+            f"mode_name={mode_cfg.get('mode_name', '<none>') if isinstance(mode_cfg, dict) else '<none>'}, "
+            f"moving_window_enabled={bool(mode_cfg.get('moving_window_enabled', False)) if isinstance(mode_cfg, dict) else False}"
+        )
         # Plot defects/shot vs ARPKZ_final_set_field using the same logic and parameters as KZ_defect_analysis.
         gauss_sigma_det = 0.3
         deriv_threshold_det = 0.055
@@ -2706,6 +2715,7 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         det_defect_x_corr = []
         det_defect_y_corr = []
         det_domain_balance_raw = []
+        shot_defect_x_all = [np.array([], dtype=float) for _ in range(len(det_x_raw))]
         for i in range(len(det_x_raw)):
             d_roi = d_rois_det[i] if i < len(d_rois_det) else np.array([], dtype=float)
             m_roi = m_rois_det[i] if i < len(m_rois_det) else np.array([], dtype=float)
@@ -2866,17 +2876,423 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                 det_defect_x_corr.append(float(xcorr))
                 det_defect_y_corr.append(float(i + 1))
 
+            shot_defect_x_all[i] = np.concatenate([
+                np.asarray(pos_x, dtype=float),
+                np.asarray(neg_x, dtype=float),
+                np.asarray(corrected_x, dtype=float),
+            ]).astype(float)
             det_counts_raw.append(int(len(pos_x) + len(neg_x) + len(corrected_x)))
 
         det_counts_raw = np.asarray(det_counts_raw, dtype=float)
         det_domain_balance_raw = np.asarray(det_domain_balance_raw, dtype=float)
+        print(
+            "KZ_det_scan branch data: "
+            f"shots={len(det_x_raw)}, det_groups={len(det_group_vals)}, "
+            f"det_counts_raw_size={det_counts_raw.size}, "
+            f"total_defects={float(np.nansum(det_counts_raw)):.6g}"
+        )
         # Normalize by the used x-region length (between xmin and xmax).
         used_region_um = float(abs(x_max_um_det - x_min_um_det))
         if used_region_um <= 0:
             used_region_um = 1.0
         det_norm_raw = det_counts_raw / used_region_um
 
+        det_x_pos_arr = np.asarray(det_defect_x_pos, dtype=float)
+        det_y_pos_arr = np.asarray(det_defect_y_pos, dtype=float)
+        det_x_neg_arr = np.asarray(det_defect_x_neg, dtype=float)
+        det_y_neg_arr = np.asarray(det_defect_y_neg, dtype=float)
+        det_x_corr_arr = np.asarray(det_defect_x_corr, dtype=float)
+        det_y_corr_arr = np.asarray(det_defect_y_corr, dtype=float)
+
+        def _compute_reconstructed_matrix():
+            """Reconstruct binary magnetization from detected defect positions and signs."""
+            if len(M_full) == 0:
+                return np.zeros_like(M_full)
+            x_axis = np.asarray(x_centers_um_det, dtype=float)
+            if x_axis.size < 2:
+                return np.zeros_like(M_full)
+
+            rec = np.zeros_like(M_full, dtype=float)
+            for shot_idx in range(len(M_full)):
+                y_shot = float(shot_idx + 1)
+                walls = []
+                walls_pos = np.asarray([], dtype=float)
+                walls_neg = np.asarray([], dtype=float)
+
+                if det_x_pos_arr.size > 0:
+                    walls_pos = np.asarray(
+                        det_x_pos_arr[np.isclose(det_y_pos_arr, y_shot, atol=1e-9, rtol=0.0)],
+                        dtype=float,
+                    )
+                    walls.extend(walls_pos.tolist())
+                if det_x_neg_arr.size > 0:
+                    walls_neg = np.asarray(
+                        det_x_neg_arr[np.isclose(det_y_neg_arr, y_shot, atol=1e-9, rtol=0.0)],
+                        dtype=float,
+                    )
+                    walls.extend(walls_neg.tolist())
+                if det_x_corr_arr.size > 0:
+                    walls.extend(det_x_corr_arr[np.isclose(det_y_corr_arr, y_shot, atol=1e-9, rtol=0.0)].tolist())
+
+                if len(walls) > 0:
+                    walls = np.unique(np.round(np.asarray(walls, dtype=float), 6))
+                    walls = walls[(walls > float(x_axis[0])) & (walls < float(x_axis[-1]))]
+                else:
+                    walls = np.asarray([], dtype=float)
+
+                sign_from_defect = _infer_start_sign_from_signed_walls(walls_pos, walls_neg)
+                if sign_from_defect is not None:
+                    sign_val = float(sign_from_defect)
+                else:
+                    m_row = np.asarray(M_full[shot_idx], dtype=float)
+                    used_mask_sign = (x_axis >= float(x_min_um_det)) & (x_axis <= float(x_max_um_det))
+                    avg_m = np.nanmean(m_row[used_mask_sign]) if np.any(used_mask_sign) else np.nanmean(m_row)
+                    sign_val = 1.0 if np.nan_to_num(avg_m, nan=0.0) > 0.0 else -1.0
+
+                n_flips = np.searchsorted(walls, x_axis, side='right')
+                row_bin = sign_val * ((-1.0) ** n_flips)
+                used_mask = (x_axis >= float(x_min_um_det)) & (x_axis <= float(x_max_um_det))
+                rec[shot_idx, :] = np.where(used_mask, row_bin, 0.0)
+
+            return rec
+
+        M_rec = _compute_reconstructed_matrix()
+
+        zero_crossing_windows_by_det = [set() for _ in det_group_vals]
+        zero_crossing_window_groups_by_det = [[] for _ in det_group_vals]
+        guide_label_suffix = 'zero crossing'
+        window_lefts = np.array([], dtype=float)
+        window_rights = np.array([], dtype=float)
+        window_colors = plt.get_cmap('tab10')(np.linspace(0.0, 1.0, max(1, len(det_group_vals))))
+
+        # Laptop KZ_window_moving routine: scan a moving spatial window and,
+        # for each detuning, plot ensemble magnetization and defect density vs x.
+        if isinstance(mode_cfg, dict) and bool(mode_cfg.get('moving_window_enabled', False)):
+            moving_window_mode_name = str(mode_cfg.get('mode_name', 'KZ_window_moving'))
+            moving_window_width_um = float(mode_cfg.get('moving_window_width_um', 30.0))
+            moving_window_step_um = float(mode_cfg.get('moving_window_step_um', 5.0))
+            moving_window_mag_abs_threshold = None
+            if mode_cfg.get('moving_window_mag_abs_threshold', None) is not None:
+                moving_window_mag_abs_threshold = float(mode_cfg.get('moving_window_mag_abs_threshold'))
+            if moving_window_width_um > 0 and moving_window_step_um > 0:
+                x_left = float(x_min_um_det)
+                x_right = float(x_max_um_det)
+                window_left_values = []
+                while x_left + moving_window_width_um <= x_right + 1e-6:
+                    window_left_values.append(float(x_left))
+                    x_left += float(moving_window_step_um)
+                if len(window_left_values) == 0:
+                    window_left_values = [float(x_min_um_det)]
+
+                window_lefts = np.asarray(window_left_values, dtype=float)
+                window_rights = window_lefts + float(moving_window_width_um)
+                window_centers = 0.5 * (window_lefts + window_rights)
+
+                window_masks = [
+                    (x_centers_um_det >= wl) & (x_centers_um_det <= wr)
+                    for wl, wr in zip(window_lefts, window_rights)
+                ]
+                window_mag_avg = np.full((len(det_group_vals), len(window_masks)), np.nan, dtype=float)
+                window_mag_sem = np.full((len(det_group_vals), len(window_masks)), np.nan, dtype=float)
+                window_defect_density = np.full((len(det_group_vals), len(window_masks)), np.nan, dtype=float)
+                window_defect_sem = np.full((len(det_group_vals), len(window_masks)), np.nan, dtype=float)
+
+                for gi, shot_idx_group in enumerate(det_group_indices):
+                    if len(shot_idx_group) == 0:
+                        continue
+                    group_m = M_rec[np.asarray(shot_idx_group, dtype=int)]
+                    for wi, mask in enumerate(window_masks):
+                        if np.count_nonzero(mask) == 0:
+                            continue
+
+                        group_m_window = group_m[:, mask]
+                        if group_m_window.size > 0:
+                            shot_mags = np.mean(group_m_window, axis=1)
+                            window_mag_avg[gi, wi] = float(np.mean(shot_mags))
+                            if shot_mags.size > 1:
+                                window_mag_sem[gi, wi] = float(np.std(shot_mags, ddof=1) / np.sqrt(shot_mags.size))
+                            else:
+                                window_mag_sem[gi, wi] = 0.0
+
+                        densities = []
+                        for shot_idx in shot_idx_group:
+                            shot_defects = shot_defect_x_all[int(shot_idx)]
+                            n_in_window = np.count_nonzero(
+                                (shot_defects >= window_lefts[wi])
+                                & (shot_defects <= window_rights[wi])
+                            )
+                            densities.append(float(n_in_window) / moving_window_width_um)
+                        if len(densities) > 0:
+                            window_defect_density[gi, wi] = float(np.mean(densities))
+                            if len(densities) > 1:
+                                window_defect_sem[gi, wi] = float(np.std(densities, ddof=1) / np.sqrt(len(densities)))
+                            else:
+                                window_defect_sem[gi, wi] = 0.0
+
+                selected_windows_by_det = [set() for _ in det_group_vals]
+                for gi in range(len(det_group_vals)):
+                    mag_vals = window_mag_avg[gi]
+                    valid = np.isfinite(mag_vals)
+                    if np.count_nonzero(valid) == 0:
+                        continue
+                    if moving_window_mag_abs_threshold is not None:
+                        for wi in np.where(valid & (np.abs(mag_vals) < moving_window_mag_abs_threshold))[0]:
+                            selected_windows_by_det[gi].add(int(wi))
+                    else:
+                        signs = np.sign(mag_vals)
+                        for wi in range(len(mag_vals)):
+                            if not valid[wi]:
+                                continue
+                            if signs[wi] == 0:
+                                selected_windows_by_det[gi].add(wi)
+                            if wi > 0 and valid[wi - 1] and signs[wi] * signs[wi - 1] < 0:
+                                selected_windows_by_det[gi].add(wi)
+                                selected_windows_by_det[gi].add(wi - 1)
+
+                def _group_overlapping_window_indices(indices):
+                    indices = sorted(set(int(idx) for idx in indices))
+                    if len(indices) == 0:
+                        return []
+                    groups = []
+                    current_group = [indices[0]]
+                    current_right = float(window_rights[indices[0]])
+                    for idx in indices[1:]:
+                        idx_left = float(window_lefts[idx])
+                        idx_right = float(window_rights[idx])
+                        if idx_left <= current_right + 1e-9:
+                            current_group.append(idx)
+                            current_right = max(current_right, idx_right)
+                        else:
+                            groups.append(current_group)
+                            current_group = [idx]
+                            current_right = idx_right
+                    groups.append(current_group)
+                    return groups
+
+                zero_crossing_window_groups_by_det = [
+                    _group_overlapping_window_indices(indices)
+                    for indices in selected_windows_by_det
+                ]
+
+                if moving_window_mag_abs_threshold is not None:
+                    selection_summary = (
+                        f"threshold-window defect-density summary "
+                        f"(|<m_rec>| < {moving_window_mag_abs_threshold:.5g})"
+                    )
+                    no_selection_message = (
+                        f"  No windows found with |<m_rec>| < {moving_window_mag_abs_threshold:.5g}."
+                    )
+                    weighted_result_label = "WEIGHTED THRESHOLD-WINDOW RESULT"
+                    region_label = "region"
+                    guide_label_suffix = f"|<m_rec>| < {moving_window_mag_abs_threshold:.5g}"
+                else:
+                    selection_summary = "zero-crossing window defect-density summary"
+                    no_selection_message = "  No zero-crossing window found for any detuning."
+                    weighted_result_label = "WEIGHTED ZERO-CROSSING RESULT"
+                    region_label = "crossing"
+                    guide_label_suffix = "zero crossing"
+
+                print(
+                    f"\n{moving_window_mode_name} {selection_summary} "
+                    "(ensemble magnetization from reconstructed profiles):"
+                )
+                any_selected_window = False
+                zero_crossing_density_records = []
+                for gi, det_val in enumerate(det_group_vals):
+                    zero_groups = zero_crossing_window_groups_by_det[gi]
+                    if len(zero_groups) == 0:
+                        continue
+
+                    try:
+                        det_txt = f"{float(det_val):.6g}"
+                    except Exception:
+                        det_txt = str(det_val)
+
+                    for crossing_idx, zero_windows in enumerate(zero_groups, start=1):
+                        x_left_group = float(np.min(window_lefts[np.asarray(zero_windows, dtype=int)]))
+                        x_right_group = float(np.max(window_rights[np.asarray(zero_windows, dtype=int)]))
+                        merged_width_um = float(x_right_group - x_left_group)
+                        if merged_width_um <= 0:
+                            continue
+
+                        merged_mask = (x_centers_um_det >= x_left_group) & (x_centers_um_det <= x_right_group)
+                        if np.count_nonzero(merged_mask) == 0:
+                            continue
+
+                        shot_idx_group = det_group_indices[gi]
+                        group_m_merged = M_rec[np.asarray(shot_idx_group, dtype=int)][:, merged_mask]
+                        shot_mags_merged = np.mean(group_m_merged, axis=1)
+                        mag_mean = float(np.mean(shot_mags_merged))
+                        if shot_mags_merged.size > 1:
+                            mag_sem = float(np.std(shot_mags_merged, ddof=1) / np.sqrt(shot_mags_merged.size))
+                        else:
+                            mag_sem = 0.0
+
+                        densities_merged = []
+                        for shot_idx in shot_idx_group:
+                            shot_defects = shot_defect_x_all[int(shot_idx)]
+                            n_in_merged_window = np.count_nonzero(
+                                (shot_defects >= x_left_group)
+                                & (shot_defects <= x_right_group)
+                            )
+                            densities_merged.append(float(n_in_merged_window) / merged_width_um)
+                        if len(densities_merged) == 0:
+                            continue
+
+                        densities_merged = np.asarray(densities_merged, dtype=float)
+                        density = float(np.mean(densities_merged))
+                        if densities_merged.size > 1:
+                            sem = float(np.std(densities_merged, ddof=1) / np.sqrt(densities_merged.size))
+                        else:
+                            sem = 0.0
+                        rel_sem = np.nan
+                        if np.isfinite(density) and abs(density) > 0:
+                            rel_sem = float(abs(sem / density) * 100.0)
+                        n_reps = int(len(det_group_indices[gi]))
+                        any_selected_window = True
+                        zero_crossing_density_records.append({
+                            'density': density,
+                            'sem': sem,
+                            'n_reps': n_reps,
+                            'det': det_val,
+                            'crossing_idx': crossing_idx,
+                        })
+
+                        if np.isfinite(rel_sem):
+                            rel_txt = f"{rel_sem:.2f}%"
+                        else:
+                            rel_txt = "nan"
+
+                        print(
+                            f"  det={det_txt}, {region_label}={crossing_idx}: "
+                            f"merged_window=[{x_left_group:.3f}, {x_right_group:.3f}] um "
+                            f"(center={0.5 * (x_left_group + x_right_group):.3f} um, "
+                            f"width={merged_width_um:.3f} um), "
+                            f"<m_rec>={mag_mean:.5f} ± {mag_sem:.5f}, "
+                            f"defects/merged_window={density:.5f} ± {sem:.5f} um^-1 (SEM, rel={rel_txt}), "
+                            f"repetitions={n_reps}"
+                        )
+
+                if not any_selected_window:
+                    print(no_selection_message)
+                else:
+                    valid_records = [
+                        rec for rec in zero_crossing_density_records
+                        if np.isfinite(rec['density'])
+                    ]
+                    if len(valid_records) > 0:
+                        densities_zc = np.asarray([rec['density'] for rec in valid_records], dtype=float)
+                        sems_zc = np.asarray([rec['sem'] for rec in valid_records], dtype=float)
+                        reps_zc = np.asarray([max(0, int(rec['n_reps'])) for rec in valid_records], dtype=float)
+
+                        inv_var_mask = np.isfinite(sems_zc) & (sems_zc > 0.0)
+                        if np.any(inv_var_mask):
+                            weights_zc = np.zeros_like(densities_zc, dtype=float)
+                            weights_zc[inv_var_mask] = 1.0 / (sems_zc[inv_var_mask] ** 2)
+                            weight_method = 'inverse-SEM^2'
+                            used_for_weight = int(np.count_nonzero(inv_var_mask))
+                        else:
+                            weights_zc = reps_zc.copy()
+                            if not np.any(weights_zc > 0):
+                                weights_zc = np.ones_like(densities_zc, dtype=float)
+                            weight_method = 'repetition'
+                            used_for_weight = int(np.count_nonzero(weights_zc > 0))
+
+                        weight_sum = float(np.sum(weights_zc))
+                        if weight_sum > 0:
+                            weighted_density = float(np.sum(weights_zc * densities_zc) / weight_sum)
+                            if weight_method == 'inverse-SEM^2':
+                                weighted_sem = float(np.sqrt(1.0 / weight_sum))
+                            else:
+                                weighted_sem = float(
+                                    np.sqrt(
+                                        np.sum(weights_zc * (densities_zc - weighted_density) ** 2)
+                                        / weight_sum
+                                    )
+                                )
+                            weighted_rel = np.nan
+                            if np.isfinite(weighted_density) and abs(weighted_density) > 0:
+                                weighted_rel = float(abs(weighted_sem / weighted_density) * 100.0)
+                            weighted_rel_txt = f"{weighted_rel:.2f}%" if np.isfinite(weighted_rel) else "nan"
+                            total_reps = int(np.sum(reps_zc))
+
+                            print(
+                                f"  {weighted_result_label}: "
+                                f"defects/merged_window={weighted_density:.5f} ± {weighted_sem:.5f} um^-1 "
+                                f"(rel={weighted_rel_txt}, weights={weight_method}, "
+                                f"entries={len(valid_records)}, weighted_entries={used_for_weight}, "
+                                f"total_repetitions={total_reps})"
+                            )
+
+                fig_mw, (ax_mwd, ax_mwm) = plt.subplots(
+                    2,
+                    1,
+                    figsize=(9.5, 7.2),
+                    sharex=True,
+                    tight_layout=True,
+                )
+                for gi, det_val in enumerate(det_group_vals):
+                    color = window_colors[gi % len(window_colors)]
+                    ax_mwd.plot(
+                        window_centers,
+                        window_defect_density[gi],
+                        'o-',
+                        color=color,
+                        markersize=5,
+                        linewidth=1.5,
+                        label=f'{float(det_val):.6g}',
+                    )
+                    ax_mwm.plot(
+                        window_centers,
+                        window_mag_avg[gi],
+                        's-',
+                        color=color,
+                        markersize=5,
+                        linewidth=1.5,
+                        label=f'{float(det_val):.6g}',
+                    )
+                    selected_idx = sorted(selected_windows_by_det[gi])
+                    if len(selected_idx) > 0:
+                        selected_idx = np.asarray(selected_idx, dtype=int)
+                        ax_mwm.plot(
+                            window_centers[selected_idx],
+                            window_mag_avg[gi, selected_idx],
+                            linestyle='None',
+                            marker='*',
+                            markersize=11,
+                            color=color,
+                            markeredgecolor='black',
+                            markeredgewidth=0.5,
+                            zorder=5,
+                        )
+
+                ax_mwd.set_ylabel('Defect density (defects / um)')
+                ax_mwd.set_title(f'{moving_window_mode_name}: average defect density and reconstructed magnetization vs window position')
+                ax_mwd.grid(True, alpha=0.25)
+                ax_mwd.legend(title='det', fontsize='small', loc='best')
+
+                ax_mwm.axhline(0.0, color='0.45', linestyle=':', linewidth=1.0)
+                if moving_window_mag_abs_threshold is not None:
+                    ax_mwm.axhline(
+                        moving_window_mag_abs_threshold,
+                        color='0.25',
+                        linestyle='--',
+                        linewidth=1.1,
+                        alpha=0.8,
+                    )
+                    ax_mwm.axhline(
+                        -moving_window_mag_abs_threshold,
+                        color='0.25',
+                        linestyle='--',
+                        linewidth=1.1,
+                        alpha=0.8,
+                    )
+                ax_mwm.set_xlabel('x window center (um)')
+                ax_mwm.set_ylabel('Ensemble mean reconstructed magnetization')
+                ax_mwm.grid(True, alpha=0.25)
+
         if det_counts_raw.size > 0:
+            print("KZ_det_scan: creating defects/domain-balance plot and raw magnetization waterfall.")
             det_unique = np.asarray(det_group_vals, dtype=float)
             det_mean = []
             det_sem = []
@@ -3166,6 +3582,51 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             ax_raw.axvline(x=float(x_min_um_det), color='lime', linestyle='--', linewidth=2.2, alpha=0.95)
             ax_raw.axvline(x=float(x_max_um_det), color='lime', linestyle='--', linewidth=2.2, alpha=0.95)
 
+            def _draw_zero_crossing_lines(ax):
+                if len(det_group_vals) == 0 or len(M_full) == 0 or len(window_lefts) == 0:
+                    return
+                for gi, det_val in enumerate(det_group_vals):
+                    zero_groups = zero_crossing_window_groups_by_det[gi]
+                    if len(zero_groups) == 0:
+                        continue
+                    shot_indices_for_det = det_group_indices[gi]
+                    if len(shot_indices_for_det) == 0:
+                        continue
+                    shot_indices_arr = np.asarray(shot_indices_for_det, dtype=int)
+                    y_min_det = float(np.min(shot_indices_arr) + 1)
+                    y_max_det = float(np.max(shot_indices_arr) + 2)
+                    color = window_colors[gi % len(window_colors)]
+                    for crossing_idx, zero_windows in enumerate(zero_groups, start=1):
+                        x_min_zc = float(window_lefts[int(zero_windows[0])])
+                        x_max_zc = float(window_rights[int(zero_windows[-1])])
+                        label = None
+                        if crossing_idx == 1:
+                            try:
+                                label = f'{float(det_val):.6g} {guide_label_suffix}'
+                            except Exception:
+                                label = f'{det_val} {guide_label_suffix}'
+                        ax.plot(
+                            [x_min_zc, x_min_zc],
+                            [y_min_det, y_max_det],
+                            color=color,
+                            linestyle=':',
+                            linewidth=1.6,
+                            alpha=0.75,
+                            zorder=4,
+                            label=label,
+                        )
+                        ax.plot(
+                            [x_max_zc, x_max_zc],
+                            [y_min_det, y_max_det],
+                            color=color,
+                            linestyle=':',
+                            linewidth=1.6,
+                            alpha=0.75,
+                            zorder=4,
+                        )
+
+            _draw_zero_crossing_lines(ax_raw)
+
             det_x_pos_arr = np.asarray(det_defect_x_pos, dtype=float)
             det_y_pos_arr = np.asarray(det_defect_y_pos, dtype=float)
             det_x_neg_arr = np.asarray(det_defect_x_neg, dtype=float)
@@ -3258,6 +3719,40 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                     yv = float(shot_idx + 1)
                     y_sep = yv + 0.50
                     ax_raw.plot([x_l, x_r], [y_sep, y_sep], color='yellow', linestyle='--', linewidth=1.0, alpha=0.72, zorder=14)
+
+            fig_rec, ax_rec = plt.subplots(figsize=(10.0, 6.5), constrained_layout=False)
+            try:
+                fig_rec.set_tight_layout(False)
+            except Exception:
+                pass
+            try:
+                fig_rec.set_constrained_layout(False)
+            except Exception:
+                pass
+            fig_rec.subplots_adjust(left=0.09, right=0.84, bottom=0.10, top=0.92)
+            cax_rec = fig_rec.add_axes([0.90, 0.10, 0.018, 0.82])
+            im_rec = ax_rec.imshow(
+                M_rec,
+                aspect='auto',
+                cmap='RdBu',
+                interpolation='nearest',
+                resample=False,
+                vmin=-1.0,
+                vmax=1.0,
+                extent=[float(x_centers_um_det[0]), float(x_centers_um_det[-1]), float(len(M_rec)) + 0.5, 0.5],
+            )
+            ax_rec.set_xlabel(r'$\mu m$')
+            ax_rec.set_ylabel('shot index (ordered by det)')
+            ax_rec.set_title(f'Reconstructed magnetization waterfall ordered by ARPKZ_final_set_field (seqs: {seqs})')
+            ax_rec.set_xlim(float(x_centers_um_det[0]), float(x_centers_um_det[-1]))
+            ax_rec.set_ylim(float(len(M_rec)) + 0.5, 0.5)
+            ax_rec.set_autoscale_on(False)
+            ax_rec.axvline(x=float(x_min_um_det), color='lime', linestyle='--', linewidth=2.2, alpha=0.95)
+            ax_rec.axvline(x=float(x_max_um_det), color='lime', linestyle='--', linewidth=2.2, alpha=0.95)
+            _draw_zero_crossing_lines(ax_rec)
+
+            cbar_rec = fig_rec.colorbar(im_rec, cax=cax_rec)
+            cbar_rec.set_label('reconstructed magnetization')
 
             if len(det_defect_x_pos) > 0:
                 ax_raw.scatter(

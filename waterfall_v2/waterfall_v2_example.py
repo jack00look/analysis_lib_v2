@@ -50,7 +50,7 @@ def main():
     """
     Main waterfall analysis function.
     
-    For KZ_det_scan_window mode, also performs:
+    For KZ_det_scan_window / KZ_window_moving modes, also performs:
     1. Domain extraction
     2. Sliding window analysis
     3. Result plotting
@@ -151,13 +151,20 @@ def main():
         traceback.print_exc()
         return None
     
-    # KZ_det_scan_window specific analysis
-    if ACTIVE_MODE == 'KZ_det_scan_window':
+    # KZ_det_scan_window specific analysis. KZ_window_moving is an alias
+    # whose MODE_CONFIG['scan'] points at the same workflow.
+    if MODE_CONFIG.get('scan') == 'KZ_det_scan_window':
         logger.info(f"\n{'='*80}")
         logger.info("KZ_det_scan_window EXTENDED ANALYSIS")
         logger.info(f"{'='*80}\n")
         
         try:
+            if seqs_to_load is not None:
+                df_window = df[df['sequence_index'].isin(seqs_to_load)].copy().reset_index(drop=True)
+            else:
+                df_window = df.copy().reset_index(drop=True)
+            logger.info(f"Window analysis shots: {len(df_window)}")
+
             # Import domain and window analysis modules
             from waterfall.domain_extraction_lib import create_domain_info_per_shot
             from waterfall.window_analysis_lib import (
@@ -171,7 +178,7 @@ def main():
             # Step 1: Extract domain information
             logger.info("Step 1: Extracting domain information for all shots...")
             domain_info_dict = create_domain_info_per_shot(
-                df,
+                df_window,
                 seqs=seqs_to_load,
                 scan='KZ_det_scan_window',
                 data_origin='show_ODs_v2',
@@ -186,7 +193,7 @@ def main():
                 try:
                     output_dir = './results/window_analysis'
                     fig_val = plot_domains_validation(
-                        df, domain_info_dict, PARAMS, MODE_CONFIG,
+                        df_window, domain_info_dict, PARAMS, MODE_CONFIG,
                         output_dir=output_dir,
                         figname='domains_validation.png'
                     )
@@ -209,7 +216,7 @@ def main():
             logger.info(f"  Range: [{x_min_um:.1f}, {x_max_um:.1f}] μm\n")
             
             results = sliding_window_analysis(
-                df,
+                df_window,
                 x_min_um=x_min_um,
                 x_max_um=x_max_um,
                 window_size_um=window_size_um,
@@ -257,7 +264,7 @@ def main():
                             continue
                 
                 if field_summary:
-                    fig3 = plot_raw_magnetization_by_field(df, field_summary, domain_info_dict, PARAMS,
+                    fig3 = plot_raw_magnetization_by_field(df_window, field_summary, domain_info_dict, PARAMS,
                                                           output_dir=output_dir,
                                                           figname='raw_magnetization_by_field.png')
                 

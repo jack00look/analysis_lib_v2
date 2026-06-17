@@ -13,9 +13,10 @@ import pandas as pd
 import json
 from pathlib import Path
 from typing import Dict, List, Tuple
+from waterfall.domain_extraction_lib import find_field_column, get_magnetization_matrix
 
 
-def analyze_window(df, window_start_um, window_size_um, mode_cfg, params, domain_info_dict=None):
+def analyze_window(df, window_start_um, window_size_um, mode_cfg, params, domain_info_dict=None, M_full=None, um_per_px=None):
     """
     Analyze a single window across all shots.
     
@@ -47,32 +48,14 @@ def analyze_window(df, window_start_um, window_size_um, mode_cfg, params, domain
     """
     window_end_um = window_start_um + window_size_um
     
-    # Get parameters
-    um_per_px = float(params.get('UM_PER_PX', 1.019))
     data_origin = mode_cfg.get('data_origin', 'show_ODs_v2') if isinstance(mode_cfg, dict) else 'show_ODs_v2'
-    
-    # Find magnetization column - same as KZ_det_scan
-    mag_col = None
-    candidates = [
-        (data_origin, 'PTAI_m1_n1D_x'),
-        (data_origin, 'PTAI_m1_SVD_n1D_x'),
-        (data_origin, 'PTAI_m1_1d'),
-    ]
-    
-    for cand in candidates:
-        if cand in df.columns:
-            mag_col = cand
-            break
-    
-    if mag_col is None:
-        raise ValueError(f"Magnetization column not found. Tried: {candidates}")
+    if M_full is None or um_per_px is None:
+        M_full, um_per_px = get_magnetization_matrix(df, mode_cfg, params, data_origin=data_origin)
+    if M_full is None:
+        raise ValueError("Could not build normalized magnetization matrix")
     
     # Find field column
-    field_col = None
-    for col in df.columns:
-        if isinstance(col, tuple) and 'ARPKZ_final_set_field' in str(col[0]):
-            field_col = col
-            break
+    field_col = find_field_column(df)
     
     if field_col is None:
         raise ValueError("Field column (ARPKZ_final_set_field) not found in DataFrame")
@@ -85,10 +68,8 @@ def analyze_window(df, window_start_um, window_size_um, mode_cfg, params, domain
             # Get field value
             field_val = float(df[field_col].iloc[shot_idx])
             
-            # Get magnetization profile
-            m_profile = df[mag_col].iloc[shot_idx]
-            if not isinstance(m_profile, np.ndarray):
-                m_profile = np.asarray(m_profile, dtype=float)
+            # Get normalized magnetization profile
+            m_profile = np.asarray(M_full[shot_idx], dtype=float)
             
             # Create x-axis
             x_centers_um = np.arange(m_profile.size) * um_per_px
@@ -294,12 +275,16 @@ def find_zero_crossing_field(field_summary, domain_balance_fit_window=0.4):
                 density_above = field_summary[field_val]['defect_density']
                 error_above = field_summary[field_val].get('defect_density_error', 0.0)
     
+    if field_below is not None and field_above is not None and field_above != field_below:
+        weight_above = (field_at_zero_fit - field_below) / (field_above - field_below)
+        weight_below = 1.0 - weight_above
+    else:
+        weight_above = 0.5
+        weight_below = 0.5
+
     # Interpolate defect density at zero crossing
     if field_below is not None and field_above is not None and density_below is not None and density_above is not None:
         # Linear interpolation between the two bracketing points
-        weight_above = (field_at_zero_fit - field_below) / (field_above - field_below) if field_above != field_below else 0.5
-        weight_below = 1.0 - weight_above
-        
         density_at_zero = weight_below * density_below + weight_above * density_above
         error_at_zero = weight_below * error_below + weight_above * error_above
         
@@ -312,11 +297,37 @@ def find_zero_crossing_field(field_summary, domain_balance_fit_window=0.4):
         error_at_zero = np.mean([e for e in fit_errors if e is not None]) if fit_errors else 0.0
         print(f"    Fallback: using average density from fit window: {density_at_zero:.6f}±{error_at_zero:.6f}")
     
+    def _interp_summary_value(key, default=np.nan):
+        if field_below is None and field_above is None:
+            return default
+        if field_below is None:
+            return field_summary[field_above].get(key, default)
+        if field_above is None:
+            return field_summary[field_below].get(key, default)
+
+        below_val = field_summary[field_below].get(key, default)
+        above_val = field_summary[field_above].get(key, default)
+        if not (np.isfinite(below_val) and np.isfinite(above_val)):
+            finite_vals = [v for v in (below_val, above_val) if np.isfinite(v)]
+            return float(finite_vals[0]) if finite_vals else default
+        if field_above == field_below:
+            return float(0.5 * (below_val + above_val))
+        return float(weight_below * below_val + weight_above * above_val)
+
+    domain_mean_at_zero = _interp_summary_value('domain_mean')
+    domain_std_at_zero = _interp_summary_value('domain_std')
+    mag_sem_at_zero = _interp_summary_value('mag_sem')
+    n_shots_at_zero = int(round(_interp_summary_value('n_shots', default=0)))
+
     result_info = {
         'field_at_zero': field_at_zero_fit,
         'mag_mean_at_zero': float(mag_at_zero_fit),
+        'mag_sem_at_zero': float(mag_sem_at_zero) if np.isfinite(mag_sem_at_zero) else np.nan,
         'domain_density_at_zero': float(density_at_zero),
         'domain_density_error_at_zero': float(error_at_zero),
+        'domain_mean': float(domain_mean_at_zero) if np.isfinite(domain_mean_at_zero) else np.nan,
+        'domain_std': float(domain_std_at_zero) if np.isfinite(domain_std_at_zero) else np.nan,
+        'n_shots': int(n_shots_at_zero),
         'field_below': float(field_below) if field_below is not None else None,
         'field_above': float(field_above) if field_above is not None else None,
         'fit_slope': float(slope),
@@ -365,6 +376,10 @@ def sliding_window_analysis(df, x_min_um, x_max_um, window_size_um, window_step_
     results = []
     window_start = x_min_um
     window_num = 0
+    data_origin = mode_cfg.get('data_origin', 'show_ODs_v2') if isinstance(mode_cfg, dict) else 'show_ODs_v2'
+    M_full, um_per_px = get_magnetization_matrix(df, mode_cfg, params, data_origin=data_origin)
+    if M_full is None:
+        raise ValueError("Could not build normalized magnetization matrix for sliding-window analysis")
     
     while window_start + window_size_um <= x_max_um:
         window_end = window_start + window_size_um
@@ -374,7 +389,16 @@ def sliding_window_analysis(df, x_min_um, x_max_um, window_size_um, window_step_
         
         try:
             # Analyze this window
-            window_data = analyze_window(df, window_start, window_size_um, mode_cfg, params, domain_info_dict)
+            window_data = analyze_window(
+                df,
+                window_start,
+                window_size_um,
+                mode_cfg,
+                params,
+                domain_info_dict,
+                M_full=M_full,
+                um_per_px=um_per_px,
+            )
             
             if not window_data:
                 print(f"  No data in this window, skipping.")
@@ -405,8 +429,12 @@ def sliding_window_analysis(df, x_min_um, x_max_um, window_size_um, window_step_
                 'window_end_um': float(window_end),
                 'field_at_zero': float(zero_info['field_at_zero']),
                 'mag_mean_at_zero': float(zero_info['mag_mean_at_zero']),
+                'mag_sem_at_zero': float(zero_info['mag_sem_at_zero']),
                 'domain_density_at_zero': float(zero_info['domain_density_at_zero']),
                 'domain_density_error_at_zero': float(zero_info['domain_density_error_at_zero']),
+                'domain_mean_at_zero': float(zero_info['domain_mean']),
+                'domain_std_at_zero': float(zero_info['domain_std']),
+                'n_shots_at_zero': int(zero_info['n_shots']),
                 'field_below': zero_info.get('field_below'),
                 'field_above': zero_info.get('field_above'),
                 'fit_slope': float(zero_info['fit_slope']),
@@ -423,6 +451,8 @@ def sliding_window_analysis(df, x_min_um, x_max_um, window_size_um, window_step_
             
         except Exception as e:
             print(f"  Error analyzing window: {e}")
+            window_start += window_step_um
+            window_num += 1
             continue
         
         # Move to next window

@@ -69,10 +69,10 @@ MAGNETIZATION_MODALITIES = {
         'affine_correction': {
             'a1': 1.,
             'b1': 0.0,
-            'c1': 0.,
+            'c1': 0.0,
             'a2': 1.,
             'b2': 0.0,
-            'c2': 0.
+            'c2': 0.0,
         },
         # Optional explicit labels (if None, library auto-detects columns)
         'm1_column': None,

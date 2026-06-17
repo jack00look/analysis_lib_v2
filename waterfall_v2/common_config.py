@@ -35,12 +35,12 @@ MAGNETIZATION_MODALITIES = {
         'atoms_images': ['PTAI_m1', 'PTAI_m2'],
         'apply_ntot_check': False,
         'affine_correction': {
-            'a1': 1.,
+            'a1': 1./1.74,
             'b1': 0.0,
-            'c1': 0.,
-            'a2': 1.,
+            'c1': -1.31e9/1.74,
+            'a2': 1./1.55,
             'b2': 0.0,
-            'c2': 0.,
+            'c2': -1.17e9/1.55,
         },
         'm1_column': None,
         'm2_column': None,
@@ -58,10 +58,10 @@ MAGNETIZATION_MODALITIES = {
         'atoms_images': ['PHC_m1_1'],
         'apply_ntot_check': False,
         # Integration window for vert2_PHC (in micrometers)
-        'x_min_integration': 100,
-        'x_max_integration': 320,
+        'x_min_integration': 1000,
+        'x_max_integration': 1250,
         # Waterfall magnetization color limits (set to None for autoscale)
-        'waterfall_mag_clim': (.7e-5, 1.3e-5),
+        'waterfall_mag_clim': (3.64e-6, 8.91e-6) #(6.5e-6, 1.324e-5)#(5.15e-6, 1.024e-5)#(.4e-5, 1.6e-5),
     },
 }
 
@@ -84,17 +84,17 @@ SHOT_FILTER_CONFIG = {
 # -------------------------
 DEFECT_ANALYSIS_PARAMS = {
     # 1) Signal preprocessing
-    'gaussian_sigma': 1.5,                 # Gaussian smoothing sigma (pixels)
+    'gaussian_sigma': 2,                 # Gaussian smoothing sigma (pixels)
 
     # 2) Peak detection on dM/dx
-    'derivative_threshold': 0.0,           # Backward-compatible base magnitude
-    'derivative_threshold_pos': 0.01e-10,       # +dM/dx threshold for positive peaks
-    'derivative_threshold_neg': -0.01e-10,      # -dM/dx threshold for negative peaks
+    'derivative_threshold': 0.4e-6,           # Backward-compatible base magnitude
+    'derivative_threshold_pos': 0.4e-6,       # +dM/dx threshold for positive peaks
+    'derivative_threshold_neg': -0.4e-6,      # -dM/dx threshold for negative peaks
 
     # 3) Post-threshold peak quality filter (on magnetization step)
     'peak_step_filter_enabled': True,
     'peak_step_filter_window_px': 4,
-    'peak_step_filter_min_abs_delta_m': .5,
+    'peak_step_filter_min_abs_delta_m': 0.5,
 
     # 4) Geometric cleanup and correction
     'min_same_sign_peak_distance_um': 10.0,

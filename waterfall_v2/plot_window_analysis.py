@@ -16,6 +16,7 @@ from pathlib import Path
 # Add analysislib_v2 to path
 sys.path.insert(0, '/home/rick/labscript-suite/userlib/analysislib/analysislib_v2')
 
+from waterfall.domain_extraction_lib import find_field_column, get_magnetization_matrix
 from waterfall.window_analysis_lib import results_to_dataframe
 
 
@@ -199,31 +200,14 @@ def plot_raw_magnetization_by_field(df, field_summary, domain_info_dict, params,
         output_dir: directory to save plot
         figname: filename for plot
     """
-    # Get magnetization column
     data_origin = params.get('data_origin', 'show_ODs_v2') if isinstance(params, dict) else 'show_ODs_v2'
-    mag_col = None
-    candidates = [
-        (data_origin, 'PTAI_m1_n1D_x'),
-        (data_origin, 'PTAI_m1_SVD_n1D_x'),
-        (data_origin, 'PTAI_m1_1d'),
-    ]
-    
-    for cand in candidates:
-        if cand in df.columns:
-            mag_col = cand
-            break
-    
-    if mag_col is None:
-        print(f"Warning: Magnetization column not found. Tried: {candidates}")
+    M_full, um_per_px = get_magnetization_matrix(df, {}, params, data_origin=data_origin)
+    if M_full is None:
+        print("Warning: normalized magnetization matrix could not be built")
         return None
     
     # Get field column
-    field_col = None
-    for col in df.columns:
-        if isinstance(col, tuple) and 'ARPKZ_final_set_field' in str(col[0]):
-            field_col = col
-            break
-    
+    field_col = find_field_column(df)
     if field_col is None:
         print("Warning: Field column not found")
         return None
@@ -235,11 +219,10 @@ def plot_raw_magnetization_by_field(df, field_summary, domain_info_dict, params,
             x_col = col
             break
     
-    # Extract and prepare data
-    um_per_px = float(params.get('UM_PER_PX', 1.019))
-    
     # Sort by field value
-    df_sorted = df.sort_values(field_col).reset_index(drop=True)
+    df_with_domain_key = df.copy()
+    df_with_domain_key['_domain_info_key'] = np.arange(len(df_with_domain_key), dtype=int)
+    df_sorted = df_with_domain_key.sort_values(field_col).reset_index(drop=True)
     
     # Get unique field values
     field_values = sorted(field_summary.keys())
@@ -260,13 +243,11 @@ def plot_raw_magnetization_by_field(df, field_summary, domain_info_dict, params,
     for sorted_idx in range(len(df_sorted)):
         shot_data = df_sorted.iloc[sorted_idx]
         
-        # Get original shot index from DataFrame
-        original_shot_idx = df_sorted.index[sorted_idx]
+        # Get original row-position key used by domain_info_dict
+        original_shot_idx = int(shot_data['_domain_info_key'])
         
         # Get magnetization profile
-        mag_profile = shot_data[mag_col]
-        if not isinstance(mag_profile, np.ndarray):
-            mag_profile = np.asarray(mag_profile)
+        mag_profile = np.asarray(M_full[original_shot_idx], dtype=float)
         
         # Get field value
         field_val = float(shot_data[field_col])

@@ -24,7 +24,7 @@ def F_rabi_oscillations(t_pulse,delta,f_rabi,tau_decoherence,amp,offset, phi):
 
 rabi_model = Model(F_rabi_oscillations, independent_vars=['t_pulse'],nan_policy='omit' )
 
-seqs = [[42]]
+seqs = [[35]]
 
 if __name__ == '__main__':
     try:

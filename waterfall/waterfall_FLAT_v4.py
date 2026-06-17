@@ -5,6 +5,8 @@ import lyse
 import sys
 import os
 
+# Add analysislib_v2 to path so waterfall_v2 plotting helpers are available.
+sys.path.insert(0, "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2")
 # Add path to general_lib
 sys.path.insert(0, "/home/rick/labscript-suite/userlib/analysislib/analysislib_v2/general_lib")
 from main_lyse import get_day_data
@@ -62,6 +64,124 @@ def _apply_recommended_center_if_enabled(cfg, mode_cfg):
     except Exception as err:
         print(f'Failed to load recommended_center from {latest_path}: {err}')
         return mode_cfg
+
+
+def _run_kz_det_scan_window_analysis(df, mode_cfg, params):
+    print()
+    print(f"{'='*80}")
+    print("KZ_det_scan_window EXTENDED ANALYSIS")
+    print(f"{'='*80}")
+
+    from waterfall.domain_extraction_lib import create_domain_info_per_shot
+    from waterfall.window_analysis_lib import (
+        sliding_window_analysis,
+        save_window_analysis_results,
+        save_window_analysis_csv,
+    )
+    from waterfall_v2.plot_domains_validation import plot_domains_validation
+    from waterfall_v2.plot_window_analysis import (
+        plot_window_analysis,
+        plot_window_analysis_with_domains,
+        plot_raw_magnetization_by_field,
+    )
+
+    seqs = mode_cfg.get('seqs')
+    data_origin = mode_cfg.get('data_origin', 'show_ODs_v2')
+    output_dir = os.path.join(os.path.dirname(CFG_PATH), 'results', 'window_analysis')
+    if seqs is not None:
+        df_window = df[df['sequence_index'].isin(seqs)].copy().reset_index(drop=True)
+    else:
+        df_window = df.copy().reset_index(drop=True)
+    print(f"Window analysis shots: {len(df_window)}")
+
+    print("Step 1: extracting domain information for all shots...")
+    domain_info_dict = create_domain_info_per_shot(
+        df_window,
+        seqs=seqs,
+        scan='KZ_det_scan_window',
+        data_origin=data_origin,
+        mode_cfg=mode_cfg,
+        params=params,
+    )
+    if not domain_info_dict:
+        print("No domain info extracted; skipping window analysis.")
+        return
+
+    try:
+        plot_domains_validation(
+            df_window,
+            domain_info_dict,
+            params,
+            mode_cfg,
+            output_dir=output_dir,
+            figname='domains_validation.png',
+        )
+    except Exception as err:
+        print(f"Warning: could not create domain validation plot: {err}")
+
+    window_size_um = float(mode_cfg.get('window_size', 80.0))
+    window_step_um = float(mode_cfg.get('window_step', 5.0))
+    x_min_um = float(params.get('X_MIN_INTEGRATION', params.get('DOMAIN_WALL_X_MIN', 920.0)))
+    x_max_um = float(params.get('X_MAX_INTEGRATION', params.get('DOMAIN_WALL_X_MAX', 1180.0)))
+    print(
+        "Step 2: sliding window analysis "
+        f"(size={window_size_um:.1f} um, step={window_step_um:.1f} um, "
+        f"range=[{x_min_um:.1f}, {x_max_um:.1f}] um)..."
+    )
+
+    results = sliding_window_analysis(
+        df_window,
+        x_min_um=x_min_um,
+        x_max_um=x_max_um,
+        window_size_um=window_size_um,
+        window_step_um=window_step_um,
+        mode_cfg=mode_cfg,
+        params=params,
+        domain_info_dict=domain_info_dict,
+    )
+    if not results:
+        print("No valid windows analyzed.")
+        return
+
+    print(f"Step 3: saving {len(results)} windows to {output_dir}")
+    save_window_analysis_results(results, output_dir=output_dir)
+    save_window_analysis_csv(results, output_dir=output_dir)
+
+    print("Step 4: creating window-analysis plots...")
+    try:
+        plot_window_analysis(
+            results,
+            window_size_um,
+            output_dir=output_dir,
+            figname='window_analysis_twin_axis.png',
+        )
+        plot_window_analysis_with_domains(
+            results,
+            window_size_um,
+            output_dir=output_dir,
+            figname='window_analysis_detailed.png',
+        )
+
+        field_summary = {}
+        for result in results:
+            for field_val_str, field_data in result.get('field_summary', {}).items():
+                try:
+                    field_summary[float(field_val_str)] = field_data
+                except (TypeError, ValueError):
+                    continue
+        if field_summary:
+            plot_raw_magnetization_by_field(
+                df_window,
+                field_summary,
+                domain_info_dict,
+                params,
+                output_dir=output_dir,
+                figname='raw_magnetization_by_field.png',
+            )
+    except Exception as err:
+        print(f"Warning: could not create window-analysis plots: {err}")
+
+    print(f"KZ_det_scan_window analysis complete. Results saved to: {output_dir}")
 
 
 if __name__ == "__main__":
@@ -130,6 +250,9 @@ if __name__ == "__main__":
 
         mode_cfg = _apply_recommended_center_if_enabled(cfg, mode_cfg)
         lib.run_mode(df_orig, mode_cfg, cfg.PARAMS)
+
+        if mode_cfg.get('scan') == 'KZ_det_scan_window':
+            _run_kz_det_scan_window_analysis(df_orig, mode_cfg, cfg.PARAMS)
 
     except Exception as e:
         print(f"FAIL: waterfall_FLAT_v4 failed: {e}")

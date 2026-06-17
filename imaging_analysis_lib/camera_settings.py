@@ -30,7 +30,7 @@ cameras = {
         'chi_sat': 215e6,
         'pulse_time': 5e-6,
         'roi_back': np.s_[:,300:500],
-        'roi_integration': np.s_[20:27,:],
+        'roi_integration': np.s_[16:22,:],
         'atoms_images': ['PHC_1', 'PHC_2' ,'PHC_3','PHC_4','PHC_m1_1'],
         'probe_image': 'PHC_probe',
         'background_image': 'PHC_back',

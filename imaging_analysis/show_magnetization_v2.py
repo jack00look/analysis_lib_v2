@@ -10,14 +10,14 @@ import lmfit as lm
 # =============================================================================
 # CONSTANTS
 # =============================================================================
-AC_REGION_START = 910
-AC_REGION_END = 1170
+AC_REGION_START = 250
+AC_REGION_END = 1900
 
 # Pre-autocorrelation filter sigma
 G2_PRE_FILTER_SIGMA = 2.0
 
 # Dynamic Y-ROI parameters
-Y_ROI_HALF_WIDTH = 50
+Y_ROI_HALF_WIDTH = 60
 Z1D_SMOOTH_SIGMA = 10
 DOMAIN_THRESHOLD = 0.04
 ROI_LINE_WIDTH = 2.0

@@ -5,8 +5,8 @@ MODE_CONFIG = {
     'data_origin': 'show_ODs_v2',
     'magnetization_modality': 'vert1_two_component',
     'constraints': {
-        'ARPKZ_final_set_field': 130.40,
-        'ARPKZ_omega_ramp_time': 16.,
+        'ARPKZ_final_set_field': 130.38,
+        'ARPKZ_omega_ramp_time': 4.,
         'ARPKZ_waiting_time': 10.,
     },
     'average': False,

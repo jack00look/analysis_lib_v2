@@ -24,7 +24,7 @@ SOFT_WALL_WIDTH = 100                # Width of soft wall transition region (µm
 DENSITY_CONFIG = {
     'program_name': 'Do_BEC_DMD_feedback',
     'n_threshold': 2e5,             # Minimum atom number for feedback
-    'kp': 0.7e-4,                    # Proportional gain
+    'kp': 3.e-4,                    # Proportional gain
     'smoothing_sigma': 8.,        # Gaussian smoothing sigma for error signal
 }
 
