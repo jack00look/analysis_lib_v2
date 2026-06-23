@@ -61,7 +61,7 @@ MAGNETIZATION_MODALITIES = {
         'x_min_integration': 1000,
         'x_max_integration': 1250,
         # Waterfall magnetization color limits (set to None for autoscale)
-        'waterfall_mag_clim': (3.64e-6, 8.91e-6) #(6.5e-6, 1.324e-5)#(5.15e-6, 1.024e-5)#(.4e-5, 1.6e-5),
+        'waterfall_mag_clim': (4.91e-6, 9.82e-6)#(3.64e-6, 8.91e-6) #(6.5e-6, 1.324e-5)#(5.15e-6, 1.024e-5)#(.4e-5, 1.6e-5),
     },
 }
 

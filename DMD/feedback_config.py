@@ -13,7 +13,7 @@ DMD_SERVER_PORT = '6001'
 # SHARED FEEDBACK REGION AND WALL CONFIGURATION
 # =============================================================================
 # These parameters apply to ALL feedback scripts
-X_CENTER =1050                   # Center position (µm)
+X_CENTER =1110                   # Center position (µm)
 FEEDBACK_WIDTH = 150                # Half-width of feedback region (µm)
 WALL_TYPE = 'soft'                  # Options: 'none', 'hard', 'soft'
 SOFT_WALL_WIDTH = 100                # Width of soft wall transition region (µm)
@@ -24,7 +24,7 @@ SOFT_WALL_WIDTH = 100                # Width of soft wall transition region (µm
 DENSITY_CONFIG = {
     'program_name': 'Do_BEC_DMD_feedback',
     'n_threshold': 2e5,             # Minimum atom number for feedback
-    'kp': 3.e-4,                    # Proportional gain
+    'kp': .5e-4,                    # Proportional gain
     'smoothing_sigma': 8.,        # Gaussian smoothing sigma for error signal
 }
 

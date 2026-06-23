@@ -669,7 +669,7 @@ def plot_OD(dict_images, key, cam, fig, ax, i, j):
     method = cam['method']
     if method == 'absorption':
         Z = ODlog
-        vmin, vmax = 0.0, 1.4e14
+        vmin, vmax = 0.0, 1.4e15
         cmap = 'gist_stern'
     elif method == 'phase_contrast':
         Z = ODlog - 1.0

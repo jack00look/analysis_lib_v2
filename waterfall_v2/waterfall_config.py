@@ -16,7 +16,7 @@ ACTIVE_MODE = 'KZ_moving_window'  # <-- Set your active mode here. Available: 'A
 #   - bubbles, bubbles_evolution, bubbles_repeat
 
 # Optional override for sequence indices (set to None to use mode default)
-SEQS=[51, 52]
+SEQS=[38, 39, 40, 41, 42, 43, 44, 45]
 #SEQS = [15,16,17,18,19,20,21]  # <-- Set your sequence indices here, or set to None to use defaults from MODE_CONFIGS
 
 # -------------------------
@@ -26,6 +26,6 @@ HDF_CONFIG = {
     'today': True,  # Set to False to load HDF from a previous day
     'year': 2026,
     'month': 5,
-    'day': 27,
+    'day': 25,
     'reanalyzed': False,  # Load from data_reanalyzed/ instead of NAS
 }

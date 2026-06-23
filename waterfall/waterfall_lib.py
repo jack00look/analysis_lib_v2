@@ -2961,6 +2961,9 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
         zero_crossing_windows_by_det = [set() for _ in det_group_vals]
         zero_crossing_window_groups_by_det = [[] for _ in det_group_vals]
         guide_label_suffix = 'zero crossing'
+        moving_window_guide_linestyle = ':'
+        moving_window_guide_linewidth = 1.6
+        moving_window_guide_alpha = 0.75
         window_lefts = np.array([], dtype=float)
         window_rights = np.array([], dtype=float)
         window_colors = plt.get_cmap('tab10')(np.linspace(0.0, 1.0, max(1, len(det_group_vals))))
@@ -2974,6 +2977,15 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
             moving_window_mag_abs_threshold = None
             if mode_cfg.get('moving_window_mag_abs_threshold', None) is not None:
                 moving_window_mag_abs_threshold = float(mode_cfg.get('moving_window_mag_abs_threshold'))
+            moving_window_guide_linestyle = str(
+                mode_cfg.get('moving_window_guide_linestyle', moving_window_guide_linestyle)
+            )
+            moving_window_guide_linewidth = float(
+                mode_cfg.get('moving_window_guide_linewidth', moving_window_guide_linewidth)
+            )
+            moving_window_guide_alpha = float(
+                mode_cfg.get('moving_window_guide_alpha', moving_window_guide_alpha)
+            )
             if moving_window_width_um > 0 and moving_window_step_um > 0:
                 x_left = float(x_min_um_det)
                 x_right = float(x_max_um_det)
@@ -3609,9 +3621,9 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                             [x_min_zc, x_min_zc],
                             [y_min_det, y_max_det],
                             color=color,
-                            linestyle=':',
-                            linewidth=1.6,
-                            alpha=0.75,
+                            linestyle=moving_window_guide_linestyle,
+                            linewidth=moving_window_guide_linewidth,
+                            alpha=moving_window_guide_alpha,
                             zorder=4,
                             label=label,
                         )
@@ -3619,9 +3631,9 @@ def waterfall_plot(df, seqs, scan, data_origin='show_ODs', constraints=None, ave
                             [x_max_zc, x_max_zc],
                             [y_min_det, y_max_det],
                             color=color,
-                            linestyle=':',
-                            linewidth=1.6,
-                            alpha=0.75,
+                            linestyle=moving_window_guide_linestyle,
+                            linewidth=moving_window_guide_linewidth,
+                            alpha=moving_window_guide_alpha,
                             zorder=4,
                         )
 

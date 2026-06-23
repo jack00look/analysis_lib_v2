@@ -11,4 +11,7 @@ MODE_CONFIG = {
     'moving_window_width_um': 150.0,
     'moving_window_step_um': 5.0,
     'moving_window_mag_abs_threshold': 0.1,
+    'moving_window_guide_linestyle': '-',
+    'moving_window_guide_linewidth': 2.8,
+    'moving_window_guide_alpha': 1.0,
 }
